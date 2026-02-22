@@ -151,7 +151,7 @@ Comet Browser → raw text → ContentFilter.sanitize() → security header + cl
 
 ### Threat Detection
 
-The filter scans for 40+ injection patterns across 12 threat categories: direct injection, indirect injection, authority spoofing, data exfiltration, social engineering, delimiter injection, encoding obfuscation, manufactured consent, moral inversion, secrecy instructions, context extraction, and hidden text.
+The filter scans for 39 injection patterns across 12 threat categories: direct injection, indirect injection, hidden text, authority spoofing, data exfiltration, social engineering, delimiter injection, encoding obfuscation, manufactured consent, moral inversion, secrecy instructions, and context extraction.
 
 ---
 
