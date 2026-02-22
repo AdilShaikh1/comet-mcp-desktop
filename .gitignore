@@ -1,0 +1,23 @@
+# Claude
+CLAUDE.md
+.claude/
+.claudeignore
+BUILD-COMET-MCP.md
+prompts/
+orchestrate.sh
+logs/
+test_results/
+.build_status.json
+
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+wheels/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
