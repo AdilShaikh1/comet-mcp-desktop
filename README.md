@@ -209,9 +209,11 @@ uv run python test_comet.py --with-browser --test tool_comet_search
 ## Troubleshooting
 
 ### "Could not connect to Comet"
-- Ensure Comet is running with `--remote-debugging-port=9222`
-- Check that nothing else is using port 9222
-- Verify CDP: open `http://localhost:9222/json` — should return JSON
+- Comet is auto-launched by the server, but if auto-launch fails:
+  - Check that Comet is installed (the server looks in standard install paths)
+  - Check that nothing else is using port 9222
+  - Set `COMET_PATH` env var to your Comet executable if it's in a non-standard location
+  - Verify CDP: open `http://localhost:9222/json` — should return JSON
 
 ### Screenshot hangs
 This server uses raw CDP `Page.captureScreenshot` instead of Playwright's `page.screenshot()` because Playwright's font renderer hangs indefinitely over CDP on Comet. If you see timeout issues, ensure you're on the latest version.
