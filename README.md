@@ -50,9 +50,27 @@ uv run playwright install chromium
 
 Verify CDP is reachable by opening `http://localhost:9222/json` in a browser — you should see a JSON array of targets.
 
-### 3. Configure Claude
+### 3. Configure Claude Desktop / Claude Code
 
-Add to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json` on Windows, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS) or Claude Code `.mcp.json`:
+**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+
+```json
+{
+  "mcpServers": {
+    "comet": {
+      "command": "/FULL/PATH/TO/comet-mcp/.venv/Scripts/python.exe",
+      "args": ["/FULL/PATH/TO/comet-mcp/comet_mcp.py"],
+      "env": {
+        "COMET_CDP_URL": "http://localhost:9222",
+        "COMET_TIMEOUT": "30000",
+        "COMET_MAX_CONTENT": "50000"
+      }
+    }
+  }
+}
+```
+
+**Claude Code** — add to `~/.claude.json` or `.mcp.json` in your project root:
 
 ```json
 {
