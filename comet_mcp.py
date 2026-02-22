@@ -714,5 +714,10 @@ async def comet_security_scan() -> str:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
+    """Entry point for console_scripts and direct execution."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

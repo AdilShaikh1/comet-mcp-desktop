@@ -26,31 +26,7 @@ Rather than using static search APIs or overwhelming Claude's context with raw b
 
 ## Quick Start
 
-### 1. Install Dependencies
-
-```bash
-cd comet-mcp
-uv sync
-uv run playwright install chromium
-```
-
-> **Note**: This project uses [`uv`](https://docs.astral.sh/uv/) exclusively for Python package management.
-
-### 2. Launch Comet with CDP
-
-**Windows (PowerShell):**
-```powershell
-& "$env:LOCALAPPDATA\Perplexity\Comet\Application\comet.exe" --remote-debugging-port=9222
-```
-
-**macOS:**
-```bash
-/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9222
-```
-
-Verify CDP is reachable by opening `http://localhost:9222/json` in a browser — you should see a JSON array of targets.
-
-### 3. Configure Claude Desktop / Claude Code
+### 1. Configure Claude Desktop / Claude Code
 
 **Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
@@ -58,13 +34,8 @@ Verify CDP is reachable by opening `http://localhost:9222/json` in a browser —
 {
   "mcpServers": {
     "comet": {
-      "command": "/FULL/PATH/TO/comet-mcp/.venv/Scripts/python.exe",
-      "args": ["/FULL/PATH/TO/comet-mcp/comet_mcp.py"],
-      "env": {
-        "COMET_CDP_URL": "http://localhost:9222",
-        "COMET_TIMEOUT": "30000",
-        "COMET_MAX_CONTENT": "50000"
-      }
+      "command": "uvx",
+      "args": ["comet-mcp-desktop"]
     }
   }
 }
@@ -76,8 +47,41 @@ Verify CDP is reachable by opening `http://localhost:9222/json` in a browser —
 {
   "mcpServers": {
     "comet": {
-      "command": "/FULL/PATH/TO/comet-mcp/.venv/Scripts/python.exe",
-      "args": ["/FULL/PATH/TO/comet-mcp/comet_mcp.py"],
+      "command": "uvx",
+      "args": ["comet-mcp-desktop"]
+    }
+  }
+}
+```
+
+> Requires [`uv`](https://docs.astral.sh/uv/) to be installed. The MCP server and all dependencies are installed automatically on first run.
+
+### 2. Install Comet Browser
+
+Download and install [Perplexity Comet](https://perplexity.ai/comet).
+
+That's it! The MCP server automatically launches Comet with remote debugging when needed.
+
+### Manual Setup (Alternative)
+
+<details>
+<summary>Click to expand if you prefer running from source</summary>
+
+```bash
+git clone https://github.com/AdilShaikh1/comet-mcp-desktop.git
+cd comet-mcp-desktop
+uv sync
+uv run playwright install chromium
+```
+
+Then configure Claude with full paths instead of `uvx`:
+
+```json
+{
+  "mcpServers": {
+    "comet": {
+      "command": "/FULL/PATH/TO/comet-mcp-desktop/.venv/Scripts/python.exe",
+      "args": ["/FULL/PATH/TO/comet-mcp-desktop/comet_mcp.py"],
       "env": {
         "COMET_CDP_URL": "http://localhost:9222",
         "COMET_TIMEOUT": "30000",
@@ -88,13 +92,21 @@ Verify CDP is reachable by opening `http://localhost:9222/json` in a browser —
 }
 ```
 
-> Replace `/FULL/PATH/TO/` with the actual path. On macOS/Linux use `.venv/bin/python` instead of `.venv/Scripts/python.exe`.
+> On macOS/Linux use `.venv/bin/python` instead of `.venv/Scripts/python.exe`.
 
-### 4. Use
+Launch Comet manually if auto-launch doesn't work:
 
-1. Start Comet with the `--remote-debugging-port=9222` flag
-2. Restart Claude Desktop (or reload MCP servers in Claude Code)
-3. Ask Claude to search, browse, or research!
+**Windows (PowerShell):**
+```powershell
+& "$env:LOCALAPPDATA\Perplexity\Comet\Application\comet.exe" --remote-debugging-port=9222
+```
+
+**macOS:**
+```bash
+/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9222
+```
+
+</details>
 
 ---
 
