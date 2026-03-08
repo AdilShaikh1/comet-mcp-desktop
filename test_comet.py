@@ -662,13 +662,17 @@ async def test_tool_comet_click_nonexistent():
 
 
 async def test_tool_comet_type():
-    """Test typing into an input field (Google search box)."""
+    """Test typing into an input field (injected on example.com for stability)."""
     t0 = time.time()
     try:
         from comet_mcp import comet_navigate, comet_type, comet_evaluate
-        await comet_navigate(url="https://www.google.com")
+        # Use example.com with an injected input — avoids Google's dynamic JS clearing the field
+        await comet_navigate(url="https://example.com")
+        await comet_evaluate(
+            "document.body.insertAdjacentHTML('beforeend', '<input id=\"test-input\" type=\"text\">')"
+        )
         result = await comet_type(
-            selector='textarea[name="q"]',
+            selector='#test-input',
             text="comet mcp test",
             press_enter=False,
             clear_first=True,
@@ -676,13 +680,13 @@ async def test_tool_comet_type():
         result_str = str(result)
         if "Typed" in result_str:
             # Verify value was actually set
-            val = await comet_evaluate('document.querySelector(\'textarea[name="q"]\').value')
+            val = await comet_evaluate('document.querySelector("#test-input").value')
             val_str = str(val)
             if "comet mcp test" in val_str:
                 record("tool_comet_type", True, "Typed and verified", time.time() - t0)
             else:
                 record("tool_comet_type", False,
-                       f"Type reported success but value wrong: {val_str[:100]}", time.time() - t0)
+                       f"Type reported success but value wrong: {val_str[:200]}", time.time() - t0)
         else:
             record("tool_comet_type", False, result_str[:200], time.time() - t0)
     except Exception as e:
@@ -977,65 +981,78 @@ async def test_e2e_clean_page_no_false_alarm():
 # Runner
 # ============================================================
 
-def run_static_tests():
+def run_static_tests(test_filter=None):
     print("\n🔧 TIER 1: Static Checks")
     print("=" * 50)
-    test_syntax()
-    test_imports()
-    test_mcp_server_object()
-    test_tool_registration()
-    test_tools_are_async()
-    test_helper_functions()
-    test_error_handling()
-    test_no_hardcoded_selectors()
-    test_url_based_search()
-    test_windows_compatibility()
-    test_entrypoint()
-    # Content filter tests
-    test_content_filter_exists()
-    test_injection_detection_true_positives()
-    test_injection_detection_false_positives()
-    test_hidden_content_stripping()
-    test_trust_classification()
-    test_base64_detection()
-    test_sanitize_full_pipeline()
-    test_security_scan_tool_exists()
-    test_tools_use_filter()
+    static_tests = [
+        ("syntax", test_syntax),
+        ("imports", test_imports),
+        ("mcp_server_object", test_mcp_server_object),
+        ("tool_registration", test_tool_registration),
+        ("tools_are_async", test_tools_are_async),
+        ("helper_functions", test_helper_functions),
+        ("error_handling", test_error_handling),
+        ("no_hardcoded_selectors", test_no_hardcoded_selectors),
+        ("url_based_search", test_url_based_search),
+        ("windows_compat", test_windows_compatibility),
+        ("entrypoint", test_entrypoint),
+        # Content filter tests
+        ("content_filter_exists", test_content_filter_exists),
+        ("injection_true_positives", test_injection_detection_true_positives),
+        ("injection_false_positives", test_injection_detection_false_positives),
+        ("hidden_content_stripping", test_hidden_content_stripping),
+        ("trust_classification", test_trust_classification),
+        ("base64_detection", test_base64_detection),
+        ("sanitize_pipeline", test_sanitize_full_pipeline),
+        ("security_scan_tool", test_security_scan_tool_exists),
+        ("tools_use_filter", test_tools_use_filter),
+    ]
+    for name, func in static_tests:
+        if test_filter and test_filter != name:
+            continue
+        func()
 
 
-async def run_browser_tests():
+async def run_browser_tests(test_filter=None):
     print("\n🌐 TIER 2: Live Browser Tests (Comet on :9222)")
     print("=" * 50)
+    # CDP check is always required for browser tests
     cdp_ok = await test_cdp_connection()
     if not cdp_ok:
         print("  ⚠️  CDP unreachable — skipping remaining browser tests")
         print("  💡 Launch Comet: comet.exe --remote-debugging-port=9222")
         return
-    await test_playwright_connect()
-    await test_tool_comet_connect()
-    await test_tool_comet_screenshot()
-    await test_tool_comet_navigate()
-    await test_tool_comet_read_page()
-    await test_tool_comet_search()
-    await test_tool_comet_tabs()
-    await test_tool_comet_click()
-    await test_tool_comet_click_nonexistent()
-    await test_tool_comet_type()
-    await test_tool_comet_evaluate()
-    await test_tool_comet_evaluate_syntax_error()
-    await test_tool_comet_wait_selector()
-    await test_tool_comet_wait_seconds()
-    await test_tool_comet_wait_no_params()
-    await test_tool_comet_tabs_invalid_index()
-    # Content filter E2E
-    await test_e2e_filter_on_navigate()
-    await test_e2e_filter_on_read_page()
-    await test_e2e_filter_on_search()
-    await test_e2e_filter_on_evaluate()
-    await test_e2e_injection_on_live_page()
-    await test_e2e_hidden_text_on_live_page()
-    await test_e2e_security_scan_tool()
-    await test_e2e_clean_page_no_false_alarm()
+    browser_tests = [
+        ("playwright_connect", test_playwright_connect),
+        ("tool_comet_connect", test_tool_comet_connect),
+        ("tool_comet_screenshot", test_tool_comet_screenshot),
+        ("tool_comet_navigate", test_tool_comet_navigate),
+        ("tool_comet_read_page", test_tool_comet_read_page),
+        ("tool_comet_search", test_tool_comet_search),
+        ("tool_comet_tabs", test_tool_comet_tabs),
+        ("tool_comet_click", test_tool_comet_click),
+        ("tool_comet_click_nonexistent", test_tool_comet_click_nonexistent),
+        ("tool_comet_type", test_tool_comet_type),
+        ("tool_comet_evaluate", test_tool_comet_evaluate),
+        ("tool_comet_evaluate_syntax_error", test_tool_comet_evaluate_syntax_error),
+        ("tool_comet_wait_selector", test_tool_comet_wait_selector),
+        ("tool_comet_wait_seconds", test_tool_comet_wait_seconds),
+        ("tool_comet_wait_no_params", test_tool_comet_wait_no_params),
+        ("tool_comet_tabs_invalid_index", test_tool_comet_tabs_invalid_index),
+        # Content filter E2E
+        ("e2e_filter_navigate", test_e2e_filter_on_navigate),
+        ("e2e_filter_read_page", test_e2e_filter_on_read_page),
+        ("e2e_filter_search", test_e2e_filter_on_search),
+        ("e2e_filter_evaluate", test_e2e_filter_on_evaluate),
+        ("e2e_injection_live", test_e2e_injection_on_live_page),
+        ("e2e_hidden_text_live", test_e2e_hidden_text_on_live_page),
+        ("e2e_security_scan", test_e2e_security_scan_tool),
+        ("e2e_clean_no_false_alarm", test_e2e_clean_page_no_false_alarm),
+    ]
+    for name, func in browser_tests:
+        if test_filter and test_filter != name:
+            continue
+        await func()
 
 
 def _get_iteration():
@@ -1088,12 +1105,25 @@ def save_results():
 
 def main():
     with_browser = "--with-browser" in sys.argv
+
+    # Parse --test NAME filter
+    test_filter = None
+    if "--test" in sys.argv:
+        idx = sys.argv.index("--test")
+        if idx + 1 < len(sys.argv):
+            test_filter = sys.argv[idx + 1]
+        else:
+            print("Error: --test requires a test name argument")
+            sys.exit(2)
+
     print("🧪 Comet MCP Server — Test Suite")
     print(f"   Mode: {'Full (static + browser)' if with_browser else 'Static only'}")
+    if test_filter:
+        print(f"   Filter: {test_filter}")
 
-    run_static_tests()
+    run_static_tests(test_filter)
     if with_browser:
-        asyncio.run(run_browser_tests())
+        asyncio.run(run_browser_tests(test_filter))
 
     output = save_results()
     return output

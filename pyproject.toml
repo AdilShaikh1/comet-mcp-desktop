@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "MCP server connecting Claude Desktop/Code to Perplexity's Comet browser via Chrome DevTools Protocol"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 authors = [
-    { name = "Adil Shaikh" },
+    { name = "Adil Shaikh", email = "AdiilShaikh@users.noreply.github.com" },
 ]
 keywords = ["mcp", "comet", "perplexity", "claude", "browser", "cdp"]
 classifiers = [
@@ -31,11 +32,11 @@ Repository = "https://github.com/AdilShaikh1/comet-mcp-desktop"
 Issues = "https://github.com/AdilShaikh1/comet-mcp-desktop/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 only-include = ["comet_mcp.py", "content_filter.py"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["comet_mcp.py", "content_filter.py", "pyproject.toml", "README.md"]
+only-include = ["comet_mcp.py", "content_filter.py", "pyproject.toml", "README.md", "LICENSE"]
