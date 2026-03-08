@@ -1,70 +1,58 @@
-# Comet MCP Server
+<p align="center">
+  <h1 align="center">Comet MCP Server</h1>
+  <p align="center">
+    <strong>Give Claude a browser that thinks.</strong>
+  </p>
+  <p align="center">
+    An MCP server connecting Claude Desktop/Code to Perplexity's Comet browser via Chrome DevTools Protocol.
+    <br />
+    Search the web with AI, navigate pages, read content, click elements, and take screenshots.
+  </p>
+  <p align="center">
+    <a href="#quick-start">Quick Start</a> &middot;
+    <a href="#available-tools">Tools</a> &middot;
+    <a href="docs/tool-reference.md">API Docs</a> &middot;
+    <a href="docs/security.md">Security</a> &middot;
+    <a href="docs/configuration.md">Configuration</a>
+  </p>
+</p>
 
-**Give Claude Code a browser that thinks.** An MCP server connecting Claude Desktop/Code to Perplexity's Comet browser via Chrome DevTools Protocol (CDP) — search the web with AI, navigate pages, read content, click elements, and take screenshots.
+<br />
 
-Rather than using static search APIs or overwhelming Claude's context with raw browser automation, Comet MCP delegates browsing to Perplexity Comet. Claude stays focused on your coding task while Comet handles navigation, dynamic content, and AI-powered research.
+> Rather than using static search APIs or overwhelming Claude's context with raw browser automation, Comet MCP **delegates browsing to Perplexity Comet**. Claude stays focused on your coding task while Comet handles navigation, dynamic content, and AI-powered research.
 
----
+<br />
 
 ## How It Works
 
 ```
-┌──────────────┐     MCP (stdio)         ┌──────────────┐     CDP (port 9222)     ┌──────────────┐
-│              │ ◄─────────────────────  │              │ ◄──────────────────────► │              │
-│ Claude       │                          │ Comet MCP    │   Chrome DevTools       │ Comet        │
-│ Desktop/Code │ ─────────────────────► │ Server       │   Protocol              │ Browser      │
-│              │                          │ (Python)     │ ──────────────────────► │ (Chromium)   │
-└──────────────┘                          └──────────────┘                         └──────────────┘
+Claude Desktop/Code  ←── MCP (stdio) ──→  Comet MCP Server  ←── CDP (9222) ──→  Comet Browser
 ```
 
-1. **Comet** runs with remote debugging enabled (port 9222)
-2. **Comet MCP Server** connects via CDP using Playwright
+1. **Comet MCP Server** auto-launches Comet with remote debugging on port 9222
+2. Connects to Comet via **Chrome DevTools Protocol** using Playwright
 3. **Claude** communicates with the server over MCP stdio transport
-4. Claude can search, navigate, read, click, type, evaluate JS, and screenshot in your Comet browser
+4. Claude can search, navigate, read, click, type, evaluate JS, and screenshot — all in your Comet browser
 
----
+<br />
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Configure Claude Desktop / Claude Code
 
-```bash
-cd comet-mcp
-uv sync
-uv run playwright install chromium
-```
+**Claude Desktop** — add to your config file:
 
-> **Note**: This project uses [`uv`](https://docs.astral.sh/uv/) exclusively for Python package management.
-
-### 2. Launch Comet with CDP
-
-**Windows (PowerShell):**
-```powershell
-& "$env:LOCALAPPDATA\Perplexity\Comet\Application\comet.exe" --remote-debugging-port=9222
-```
-
-**macOS:**
-```bash
-/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9222
-```
-
-Verify CDP is reachable by opening `http://localhost:9222/json` in a browser — you should see a JSON array of targets.
-
-### 3. Configure Claude Desktop / Claude Code
-
-**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+| Platform | Config path |
+|----------|------------|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 
 ```json
 {
   "mcpServers": {
     "comet": {
-      "command": "/FULL/PATH/TO/comet-mcp/.venv/Scripts/python.exe",
-      "args": ["/FULL/PATH/TO/comet-mcp/comet_mcp.py"],
-      "env": {
-        "COMET_CDP_URL": "http://localhost:9222",
-        "COMET_TIMEOUT": "30000",
-        "COMET_MAX_CONTENT": "50000"
-      }
+      "command": "uvx",
+      "args": ["comet-mcp-desktop"]
     }
   }
 }
@@ -76,165 +64,186 @@ Verify CDP is reachable by opening `http://localhost:9222/json` in a browser —
 {
   "mcpServers": {
     "comet": {
-      "command": "/FULL/PATH/TO/comet-mcp/.venv/Scripts/python.exe",
-      "args": ["/FULL/PATH/TO/comet-mcp/comet_mcp.py"],
-      "env": {
-        "COMET_CDP_URL": "http://localhost:9222",
-        "COMET_TIMEOUT": "30000",
-        "COMET_MAX_CONTENT": "50000"
-      }
+      "command": "uvx",
+      "args": ["comet-mcp-desktop"]
     }
   }
 }
 ```
 
-> Replace `/FULL/PATH/TO/` with the actual path. On macOS/Linux use `.venv/bin/python` instead of `.venv/Scripts/python.exe`.
+> Requires [`uv`](https://docs.astral.sh/uv/). The MCP server and all dependencies install automatically on first run.
 
-### 4. Use
+### 2. Install Comet Browser
 
-1. Start Comet with the `--remote-debugging-port=9222` flag
-2. Restart Claude Desktop (or reload MCP servers in Claude Code)
-3. Ask Claude to search, browse, or research!
+Download and install [Perplexity Comet](https://perplexity.ai/comet).
 
----
+**That's it.** The server auto-launches Comet with remote debugging when needed.
+
+<details>
+<summary><strong>Manual setup from source</strong></summary>
+
+<br />
+
+```bash
+git clone https://github.com/AdilShaikh1/comet-mcp-desktop.git
+cd comet-mcp-desktop
+uv sync
+uv run playwright install chromium
+```
+
+See [Configuration](docs/configuration.md) for full paths setup and environment variables.
+
+</details>
+
+<br />
 
 ## Available Tools
 
 | Tool | Description |
 |------|-------------|
 | `comet_connect` | Connect to Comet via CDP (auto-launches if needed) |
-| `comet_search` | Search via Perplexity using URL-based navigation, returns AI-generated results |
-| `comet_navigate` | Navigate to any URL with configurable wait conditions |
-| `comet_read_page` | Extract page text via JS evaluation, with optional CSS selector |
-| `comet_screenshot` | Capture screenshot via raw CDP `Page.captureScreenshot` (base64 PNG) |
-| `comet_click` | Click elements by CSS selector or `text=...` matching |
-| `comet_type` | Type into input fields with optional clear-first and Enter |
-| `comet_tabs` | List, open, switch, or close browser tabs |
-| `comet_evaluate` | Run arbitrary JavaScript in the page context |
-| `comet_wait` | Wait for an element selector or a fixed delay |
-| `comet_security_scan` | Deep scan for hidden text, CSS-invisible elements, and injection patterns |
+| `comet_search` | Search via Perplexity — returns AI-generated results |
+| `comet_navigate` | Navigate to any URL |
+| `comet_read_page` | Extract page text, with optional CSS selector |
+| `comet_screenshot` | Capture screenshot (base64 PNG) |
+| `comet_click` | Click elements by CSS selector or text |
+| `comet_type` | Type into input fields |
+| `comet_tabs` | List, open, switch, or close tabs |
+| `comet_evaluate` | Run JavaScript in the page context |
+| `comet_wait` | Wait for an element or a fixed delay |
+| `comet_security_scan` | Deep scan for hidden text and injection patterns |
 
----
+> Full parameter documentation: **[Tool Reference](docs/tool-reference.md)**
 
-## Web Content Trust Policy
-
-All web content returned by this server passes through a server-side `ContentFilter` that implements defense-in-depth sanitization before content reaches Claude.
-
-```
-Comet Browser → raw text → ContentFilter.sanitize() → security header + cleaned text → Claude
-```
-
-**What gets filtered:** `comet_search`, `comet_read_page`, `comet_navigate`, `comet_evaluate` (string results)
-
-**What does NOT get filtered:** `comet_screenshot` (binary image), `comet_connect`, `comet_click`, `comet_type`, `comet_tabs`, `comet_wait` (no web content)
-
-### Trust Tiers
-
-| Tier | Examples |
-|------|----------|
-| **HIGH** | `.gov`, `.edu`, arxiv, bbc, reuters, nih |
-| **STANDARD** | Established companies, unknown but clean domains |
-| **LOW** | wordpress, medium, reddit, quora (user-generated content) |
-| **UNTRUSTED** | Any page with injection patterns detected (auto-downgrade) |
-
-### Threat Detection
-
-The filter scans for 40+ injection patterns across 12 threat categories: direct injection, indirect injection, authority spoofing, data exfiltration, social engineering, delimiter injection, encoding obfuscation, manufactured consent, moral inversion, secrecy instructions, context extraction, and hidden text.
-
----
+<br />
 
 ## Example Usage
 
-**"Search Perplexity for the latest AI news"**
-> Claude uses `comet_search` with the query, waits for Perplexity to generate results, and returns the AI-synthesized answer.
+| You say | Claude does |
+|---------|-----------|
+| *"Search Perplexity for the latest AI news"* | `comet_search` — waits for Perplexity, returns AI-synthesized answer |
+| *"Open Hacker News and summarize the front page"* | `comet_navigate` + `comet_read_page` |
+| *"Click the first link and read the article"* | `comet_click` + `comet_read_page` |
+| *"Take a screenshot of what you see"* | `comet_screenshot` — captures via raw CDP |
+| *"Is this page safe?"* | `comet_security_scan` — checks for hidden text and injections |
 
-**"Open Hacker News and summarize the front page"**
-> Claude uses `comet_navigate` to go to `https://news.ycombinator.com`, then `comet_read_page` to extract content.
+<br />
 
-**"Click the first link and read the article"**
-> Claude uses `comet_click` on the link, waits, then `comet_read_page` to extract the article text.
+## Web Content Trust Policy
 
-**"Take a screenshot of what you see"**
-> Claude uses `comet_screenshot` to capture the rendered page via raw CDP.
+All web content is sanitized through a `ContentFilter` before reaching Claude — defense-in-depth against prompt injection via web pages.
 
-**"Is this page safe?"**
-> Claude uses `comet_security_scan` to check for hidden text, CSS-invisible elements, and injection attempts.
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `COMET_CDP_URL` | `http://localhost:9222` | CDP endpoint for Comet |
-| `COMET_TIMEOUT` | `30000` | Default timeout in ms for page operations |
-| `COMET_MAX_CONTENT` | `50000` | Max characters to extract from pages |
-| `COMET_PATH` | auto-detected | Override Comet executable path |
-
----
-
-## Testing
-
-The test suite includes 45 tests: 20 static + 25 end-to-end browser tests.
-
-```bash
-# Full E2E suite (requires Comet running with CDP)
-uv run python test_comet.py --with-browser
-
-# Run a specific test
-uv run python test_comet.py --with-browser --test tool_comet_search
+```
+Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──→  security header + cleaned text  ──→  Claude
 ```
 
-### Test Tiers
+| Trust Tier | Criteria |
+|------------|----------|
+| **HIGH** | `.gov`, `.edu`, arxiv, bbc, reuters, nih |
+| **STANDARD** | Established companies, unknown clean domains |
+| **LOW** | wordpress, medium, reddit, quora |
+| **UNTRUSTED** | Injection patterns detected (auto-downgraded) |
 
-- **Tier 1a — Static Core (11 tests):** Syntax, imports, server object, tool registration, async checks, helpers, error handling, URL-based search, Windows compat, entrypoint
-- **Tier 1b — Static Filter (9 tests):** Content filter, injection detection, false positives, hidden content, trust classification, base64, sanitize pipeline, security scan tool
-- **Tier 2a — Live Browser (17 tests):** All 11 tools tested against a live Comet instance
-- **Tier 2b — Live Filter (8 tests):** End-to-end injection detection, hidden text detection, security scan, false alarm verification
+The filter scans for **39 injection patterns** across **12 threat categories** including direct injection, authority spoofing, data exfiltration, delimiter injection, and more.
 
----
+> Full details: **[Security Documentation](docs/security.md)**
 
-## Troubleshooting
-
-### "Could not connect to Comet"
-- Ensure Comet is running with `--remote-debugging-port=9222`
-- Check that nothing else is using port 9222
-- Verify CDP: open `http://localhost:9222/json` — should return JSON
-
-### Screenshot hangs
-This server uses raw CDP `Page.captureScreenshot` instead of Playwright's `page.screenshot()` because Playwright's font renderer hangs indefinitely over CDP on Comet. If you see timeout issues, ensure you're on the latest version.
-
-### Connection lost mid-session
-Call the `comet_connect` tool to reconnect without restarting.
-
-### Slow search results
-Perplexity AI answers take 5-15 seconds to generate. The default `wait_seconds=10` works for most queries. For complex research, increase to 15-20.
-
----
+<br />
 
 ## How This Compares
 
-| Feature | Search APIs (Tavily, WebFetch) | Browser Automation (Puppeteer MCP) | Comet MCP |
-|---------|-------------------------------|-----------------------------------|-----------|
+| Feature | Search APIs | Browser MCPs | **Comet MCP** |
+|---------|------------|-------------|--------------|
 | AI-powered search | Varies | No | **Perplexity AI** |
 | Interactive browsing | No | Yes | **Yes** |
-| Context window impact | Low | **High** (one-agent-do-all) | **Low** (delegated) |
+| Context window impact | Low | High | **Low** |
 | Screenshots | No | Yes | **Yes** |
-| Security filtering | No | No | **Yes** (ContentFilter) |
+| Security filtering | No | No | **Yes** |
 | Click/type/navigate | No | Yes | **Yes** |
 
-The key advantage: Comet MCP gives Claude access to **Perplexity's AI search** with full browser control, while keeping Claude's context window clean through multi-agent delegation.
+> Comet MCP gives Claude access to **Perplexity's AI search** with full browser control, while keeping Claude's context window clean through multi-agent delegation.
 
----
+<br />
+
+## Testing
+
+**45 tests** — 20 static + 25 end-to-end browser tests.
+
+```bash
+uv run python test_comet.py --with-browser
+```
+
+<details>
+<summary><strong>Test tier breakdown</strong></summary>
+
+| Tier | Tests | Coverage |
+|------|-------|----------|
+| **1a** Static Core | 11 | Syntax, imports, tool registration, async, error handling |
+| **1b** Static Filter | 9 | Injection detection, false positives, trust classification |
+| **2a** Live Browser | 17 | All 11 tools against a live Comet instance |
+| **2b** Live Filter | 8 | E2E injection/hidden text detection, security scan |
+
+</details>
+
+<br />
+
+## Troubleshooting
+
+<details>
+<summary><strong>"Could not connect to Comet"</strong></summary>
+
+Comet is auto-launched, but if it fails:
+- Check that Comet is installed
+- Check port 9222 is free
+- Set `COMET_PATH` env var for non-standard installs
+- Verify: open `http://localhost:9222/json`
+
+</details>
+
+<details>
+<summary><strong>Screenshot hangs</strong></summary>
+
+Uses raw CDP `Page.captureScreenshot` to avoid Playwright font renderer hangs. Ensure you're on the latest version.
+
+</details>
+
+<details>
+<summary><strong>Connection lost</strong></summary>
+
+Call `comet_connect` to reconnect without restarting.
+
+</details>
+
+<details>
+<summary><strong>Slow search results</strong></summary>
+
+Perplexity answers take 5-15 seconds. Default `wait_seconds=10`. Increase to 15-20 for complex queries.
+
+</details>
+
+<br />
 
 ## Tech Stack
 
-- **Python 3.14+** with `uv` package manager
-- **Playwright** for CDP browser automation
-- **MCP SDK** (`mcp[cli]`) for Model Context Protocol transport
-- **Pydantic** for data validation
-- **Raw CDP** for screenshot capture (bypasses Playwright font renderer)
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Python 3.14+ with `uv` |
+| Browser automation | Playwright (CDP) |
+| MCP transport | `mcp[cli]` SDK (stdio) |
+| Screenshots | Raw CDP `Page.captureScreenshot` |
+| Content security | `ContentFilter` — 39 patterns, 12 categories |
+
+<br />
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[Tool Reference](docs/tool-reference.md)** | Full API docs for all 11 tools with parameters, defaults, and examples |
+| **[Security](docs/security.md)** | Web Content Trust Policy, threat categories, trust tiers, adding patterns |
+| **[Configuration](docs/configuration.md)** | Environment variables, platform support, MCP config, parameter validation |
+| **[Contributing](CONTRIBUTING.md)** | How to contribute, dev setup, code guidelines |
 
 ## License
 
-MIT
+[MIT](LICENSE)
