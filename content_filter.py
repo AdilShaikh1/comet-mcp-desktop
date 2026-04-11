@@ -100,7 +100,7 @@ INJECTION_PATTERNS: list[tuple[re.Pattern, str, ThreatCategory]] = [
     (re.compile(r"(?i)\bstay in character\b"), "roleplay-persistence", ThreatCategory.SOCIAL_ENGINEERING),
 
     # ── Category 7: Delimiter / Format Injection ──
-    (re.compile(r"<\/?s(?:ystem)?>"), "fake-system-tags", ThreatCategory.DELIMITER_INJECTION),
+    (re.compile(r"<\/?system>"), "fake-system-tags", ThreatCategory.DELIMITER_INJECTION),
     (re.compile(r"\[\/?(?:INST|SYS)\]"), "fake-inst-tags", ThreatCategory.DELIMITER_INJECTION),
     (re.compile(r"<<\/?SYS>>"), "fake-sys-delimiters", ThreatCategory.DELIMITER_INJECTION),
     (re.compile(r"(?i)Human:|Assistant:"), "chat-format-injection", ThreatCategory.DELIMITER_INJECTION),
