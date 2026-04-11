@@ -75,11 +75,29 @@ def _find_comet_path() -> Optional[str]:
     return None
 
 
-def _launch_comet(port: int = 9222) -> bool:
-    """Launch Comet with remote debugging enabled."""
+def _kill_comet() -> None:
+    """Kill all running Comet processes."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "comet.exe"],
+            capture_output=True,
+        )
+    else:
+        subprocess.run(["pkill", "-f", "comet"], capture_output=True)
+
+
+async def _launch_comet(port: int = 9222, force: bool = False) -> bool:
+    """Launch Comet with remote debugging enabled.
+
+    If force=True, kills any existing Comet process first to ensure
+    CDP is available on the specified port.
+    """
     path = _find_comet_path()
     if not path:
         return False
+    if force:
+        _kill_comet()
+        await asyncio.sleep(2)
     try:
         creation_flags = 0
         if hasattr(subprocess, "DETACHED_PROCESS"):
@@ -93,7 +111,7 @@ def _launch_comet(port: int = 9222) -> bool:
                 urllib.request.urlopen(f"http://localhost:{port}/json", timeout=1)
                 return True
             except Exception:
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
     except Exception:
         pass
     return False
@@ -113,6 +131,7 @@ async def _ensure_browser() -> Browser:
             pass
         _playwright = None
     _browser = None
+    _page = None
 
     _playwright = await async_playwright().start()
 
@@ -124,7 +143,7 @@ async def _ensure_browser() -> Browser:
         pass
 
     # Try auto-launching Comet
-    launched = _launch_comet()
+    launched = await _launch_comet()
     if launched:
         try:
             _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
@@ -134,9 +153,20 @@ async def _ensure_browser() -> Browser:
                 f"Comet launched but could not connect via CDP at {CDP_URL}: {e}"
             )
 
+    # Comet may be running without CDP -- force-restart with CDP enabled
+    launched = await _launch_comet(force=True)
+    if launched:
+        try:
+            _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
+            return _browser
+        except Exception as e:
+            raise ConnectionError(
+                f"Force-restarted Comet but could not connect via CDP at {CDP_URL}: {e}"
+            )
+
     raise ConnectionError(
         f"Could not connect to Comet at {CDP_URL}. "
-        f"Make sure Comet is running with --remote-debugging-port=9222."
+        f"Make sure Comet is installed."
     )
 
 
@@ -171,7 +201,7 @@ async def _extract_text(
         const walk = (el) => {
             if (!el) return;
             const tag = el.tagName ? el.tagName.toLowerCase() : '';
-            const skip = ['script', 'style', 'noscript', 'svg', 'path'];
+            const skip = ['script', 'style', 'noscript', 'svg', 'path', 'nav', 'aside', 'header', 'footer'];
             if (skip.includes(tag)) return;
             if (el.nodeType === Node.TEXT_NODE) {
                 const t = el.textContent.trim();
@@ -258,20 +288,37 @@ async def comet_search(
             return "Error: query must not be empty."
         page = await _get_page()
         wait_seconds = _clamp_wait(wait_seconds, default=10)
-        search_url = f"https://www.perplexity.ai/search?q={quote(query)}"
+        search_url = f"https://www.perplexity.ai/search?q={quote(query, safe='')}"
         if mode == "research":
             search_url += "&mode=research"
         await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-        await asyncio.sleep(wait_seconds)
+
+        # Wait for the AI answer to render instead of blind sleep
+        try:
+            await page.wait_for_selector(
+                '[class*="prose"], [class*="thread"]',
+                timeout=wait_seconds * 1000,
+            )
+            # Allow extra time for streaming to finish
+            await asyncio.sleep(min(wait_seconds, 5))
+        except Exception:
+            # Fall through -- extract whatever is available
+            await asyncio.sleep(wait_seconds)
+
+        # Verify we actually landed on a search result page
+        url = page.url
+        if "/search" not in url:
+            return f"Error: Perplexity did not navigate to search results. Current URL: {url}"
 
         title = await page.title()
-        url = page.url
-        text = await _extract_text(page, include_links=True)
+        text = await _extract_text(page, selector="main", include_links=True)
 
-        # Extract external sources
+        # Extract external sources (from main content only, not sidebar)
         sources = await page.evaluate("""
             (() => {
-                const links = Array.from(document.querySelectorAll('a[href]'));
+                const main = document.querySelector('main');
+                if (!main) return [];
+                const links = Array.from(main.querySelectorAll('a[href]'));
                 return links
                     .filter(a => a.href.startsWith('http') && !a.href.includes('perplexity.ai'))
                     .map(a => ({ text: a.textContent.trim(), url: a.href }))
@@ -324,14 +371,11 @@ async def comet_navigate(
         title = await page.title()
         final_url = page.url
         preview = await _extract_text(page, max_length=3000)
-        scan = _filter.sanitize(preview, final_url)
+        combined = f"**Navigated to**: {final_url}\n**Title**: {title}\n\n**Preview** (first ~3000 chars):\n{preview}"
+        scan = _filter.sanitize(combined, final_url)
         if scan.injection_detected:
             print(f"⚠️ INJECTION on {final_url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return (
-            f"**Navigated to**: {final_url}\n"
-            f"**Title**: {title}\n\n"
-            f"**Preview** (first ~3000 chars):\n{scan.text}"
-        )
+        return scan.text
     except Exception as e:
         error_type = type(e).__name__
         if "closed" in str(e).lower():
@@ -365,15 +409,11 @@ async def comet_read_page(
             include_links=include_links,
             max_length=max_length,
         )
-        scan = _filter.sanitize(text, url)
+        combined = f"**Page**: {title}\n**URL**: {url}\n**Selector**: {selector or '(full page)'}\n\n---\n\n{text}"
+        scan = _filter.sanitize(combined, url)
         if scan.injection_detected:
             print(f"⚠️ INJECTION on {url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return (
-            f"**Page**: {title}\n"
-            f"**URL**: {url}\n"
-            f"**Selector**: {selector or '(full page)'}\n\n"
-            f"---\n\n{scan.text}"
-        )
+        return scan.text
     except Exception as e:
         error_type = type(e).__name__
         if "closed" in str(e).lower():
@@ -393,7 +433,10 @@ async def comet_screenshot(full_page: bool = False) -> str:
         # Use CDP directly — Playwright's screenshot hangs on Comet's font renderer
         cdp = await page.context.new_cdp_session(page)
         try:
-            result = await cdp.send("Page.captureScreenshot", {"format": "png"})
+            params = {"format": "png"}
+            if full_page:
+                params["captureBeyondViewport"] = True
+            result = await cdp.send("Page.captureScreenshot", params)
             b64 = result["data"]
         finally:
             await cdp.detach()
@@ -559,8 +602,9 @@ async def comet_evaluate(expression: str) -> str:
         page = await _get_page()
         result = await page.evaluate(expression)
         if isinstance(result, (dict, list)):
-            return json.dumps(result, indent=2, ensure_ascii=False)
-        result_str = str(result)
+            result_str = json.dumps(result, indent=2, ensure_ascii=False)
+        else:
+            result_str = str(result)
         scan = _filter.sanitize(result_str, page.url)
         if scan.injection_detected:
             print(f"⚠️ INJECTION in eval on {page.url}: {len(scan.threats)} patterns", file=sys.stderr)
@@ -588,7 +632,7 @@ async def comet_wait(
         if selector:
             await page.wait_for_selector(selector, timeout=DEFAULT_TIMEOUT)
             return f"**Element found**: {selector}"
-        elif seconds:
+        elif seconds is not None:
             seconds = _clamp_wait(seconds, default=5)
             await asyncio.sleep(seconds)
             return f"**Waited**: {seconds} seconds"
