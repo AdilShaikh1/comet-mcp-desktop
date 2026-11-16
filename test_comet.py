@@ -37,6 +37,14 @@ class TestResult:
 
 
 results: list[TestResult] = []
+_source_cache: dict[str, str] = {}
+
+
+def _read_source(filename: str) -> str:
+    """Read and cache source file content to avoid redundant disk I/O."""
+    if filename not in _source_cache:
+        _source_cache[filename] = Path(filename).read_text(encoding="utf-8")
+    return _source_cache[filename]
 
 
 def record(name, passed, message="", duration=0):
@@ -166,7 +174,7 @@ def test_error_handling():
     """Check for sufficient try/except blocks (at least 5)."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         try_count = source.count("try:")
         except_count = source.count("except")
         if try_count < 5:
@@ -183,7 +191,7 @@ def test_no_hardcoded_selectors():
     """Ensure we don't use fragile Perplexity CSS selectors."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         bad = [
             "textarea[placeholder",
             ".prose",
@@ -206,7 +214,7 @@ def test_url_based_search():
     """Verify search uses URL navigation."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         if "perplexity.ai/search?q=" in source:
             record("url_based_search", True, "URL-based (selector-immune)", time.time() - t0)
         else:
@@ -220,7 +228,7 @@ def test_windows_compatibility():
     """Check for Windows support code."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         checks = {
             "LOCALAPPDATA": "LOCALAPPDATA" in source,
             "comet.exe": "comet.exe" in source.lower(),
@@ -239,7 +247,7 @@ def test_entrypoint():
     """Check for proper __main__ entry point."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         if '__name__' in source and 'mcp.run()' in source:
             record("entrypoint", True, duration=time.time() - t0)
         else:
@@ -460,16 +468,17 @@ def test_tools_use_filter():
     """Verify filtered tools reference ContentFilter."""
     t0 = time.time()
     try:
-        source = Path("comet_mcp.py").read_text(encoding="utf-8")
+        source = _read_source("comet_mcp.py")
         if "content_filter" not in source and "ContentFilter" not in source:
             record("tools_use_filter", False, "No ContentFilter import", time.time()-t0)
             return
-        sanitize_count = source.count(".sanitize(")
+        # Minus 2: the helper's own def line and the .sanitize( call inside it aren't tool call sites.
+        sanitize_count = source.count(".sanitize(") + source.count("_sanitize_and_return(") - 2
         if sanitize_count < 3:
             record("tools_use_filter", False,
-                   f"sanitize() called {sanitize_count}x, need >=3", time.time()-t0)
+                   f"sanitize usage {sanitize_count}x, need >=3", time.time()-t0)
         else:
-            record("tools_use_filter", True, f"sanitize() called {sanitize_count}x", time.time()-t0)
+            record("tools_use_filter", True, f"sanitize usage {sanitize_count}x", time.time()-t0)
     except Exception as e:
         record("tools_use_filter", False, f"{type(e).__name__}: {e}", time.time()-t0)
 
@@ -735,10 +744,11 @@ async def test_tool_comet_wait_selector():
     try:
         from comet_mcp import comet_navigate, comet_wait
         await comet_navigate(url="https://example.com")
-        result = await comet_wait(selector="h1")
+        # example.com dropped its <h1> in 2026; its only element now is a <p>.
+        result = await comet_wait(selector="p")
         result_str = str(result)
         if "Element found" in result_str:
-            record("tool_comet_wait_selector", True, "Found h1", time.time() - t0)
+            record("tool_comet_wait_selector", True, "Found p", time.time() - t0)
         else:
             record("tool_comet_wait_selector", False, result_str[:200], time.time() - t0)
     except Exception as e:

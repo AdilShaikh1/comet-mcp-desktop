@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Browsers",
 ]
 dependencies = [
-    "mcp[cli]>=1.26.0",
+    "mcp[cli]>=1.26.0,<2",  # 2.x removed mcp.server.fastmcp; migrate before lifting this
     "playwright>=1.58.0",
     "pydantic>=2.12.5",
 ]

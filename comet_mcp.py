@@ -13,7 +13,6 @@ Usage:
 """
 
 import asyncio
-import base64
 import json
 import os
 import subprocess
@@ -38,6 +37,9 @@ CDP_URL = os.environ.get("COMET_CDP_URL", "http://localhost:9222")
 DEFAULT_TIMEOUT = int(os.environ.get("COMET_TIMEOUT", "30000"))  # ms
 MAX_CONTENT_LENGTH = int(os.environ.get("COMET_MAX_CONTENT", "50000"))  # chars
 MAX_WAIT_SECONDS = 120  # hard cap for any sleep/wait parameter
+VALID_SEARCH_MODES = ("search", "research")
+VALID_WAIT_FOR = ("load", "domcontentloaded", "networkidle")
+VALID_TAB_ACTIONS = ("list", "new", "switch", "close")
 
 
 def _clamp_wait(value: int, default: int = 10) -> int:
@@ -119,7 +121,7 @@ async def _launch_comet(port: int = 9222, force: bool = False) -> bool:
 
 async def _ensure_browser() -> Browser:
     """Connect to Comet via CDP. Auto-launch if needed."""
-    global _playwright, _browser
+    global _playwright, _browser, _page
     if _browser and _browser.is_connected():
         return _browser
 
@@ -135,38 +137,29 @@ async def _ensure_browser() -> Browser:
 
     _playwright = await async_playwright().start()
 
-    # First attempt to connect
-    try:
-        _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
-        return _browser
-    except Exception:
-        pass
-
-    # Try auto-launching Comet
-    launched = await _launch_comet()
-    if launched:
+    # Try: direct connect → auto-launch → force-restart with CDP
+    strategies = [
+        (None, "Direct CDP connection failed"),
+        (lambda: _launch_comet(), "Comet launched but CDP connection failed"),
+        (lambda: _launch_comet(force=True), "Force-restarted Comet but CDP connection failed"),
+    ]
+    last_error = None
+    for launcher, err_msg in strategies:
+        if launcher:
+            launched = await launcher()
+            if not launched:
+                continue
         try:
             _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
             return _browser
         except Exception as e:
-            raise ConnectionError(
-                f"Comet launched but could not connect via CDP at {CDP_URL}: {e}"
-            )
-
-    # Comet may be running without CDP -- force-restart with CDP enabled
-    launched = await _launch_comet(force=True)
-    if launched:
-        try:
-            _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
-            return _browser
-        except Exception as e:
-            raise ConnectionError(
-                f"Force-restarted Comet but could not connect via CDP at {CDP_URL}: {e}"
-            )
+            last_error = f"{err_msg}: {e}"
+            if launcher:
+                break  # Comet started but refused CDP: stop here rather than escalate to a force-restart
 
     raise ConnectionError(
         f"Could not connect to Comet at {CDP_URL}. "
-        f"Make sure Comet is installed."
+        f"Make sure Comet is installed. Last error: {last_error}"
     )
 
 
@@ -187,43 +180,81 @@ async def _get_page() -> Page:
     return _page
 
 
+def _valid_tab_index(tab_index: Optional[int], pages: list) -> bool:
+    """Check if tab_index is a valid index into pages."""
+    return tab_index is not None and 0 <= tab_index < len(pages)
+
+
+def _handle_error(e: Exception, context: str = "") -> str:
+    """Format tool errors consistently."""
+    error_type = type(e).__name__
+    if "closed" in str(e).lower():
+        return "Error: Browser connection lost. Use comet_connect to reconnect."
+    if "Timeout" in str(e):
+        return f"Error: {context} timed out. {e}" if context else f"Error: Timed out. {e}"
+    return f"Error ({error_type}): {e}"
+
+
+def _sanitize_and_return(text: str, url: str) -> str:
+    """Run content filter and log injections. Returns sanitized text."""
+    scan = _filter.sanitize(text, url)
+    if scan.injection_detected:
+        print(f"⚠️ INJECTION on {url}: {len(scan.threats)} patterns", file=sys.stderr)
+    return scan.text
+
+
+_JS_EXTRACT_TEMPLATE = """
+(root) => {
+    const node = root || document.body;
+    const blocks = [];
+    const walk = (el) => {
+        if (!el) return;
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        const skip = ['script', 'style', 'noscript', 'svg', 'path', 'nav', 'aside', 'header', 'footer'];
+        if (skip.includes(tag)) return;
+        if (tag === 'details' && !el.open && !INCLUDE_COLLAPSED) {
+            // A collapsed section shows only its summary line, so read just that.
+            const summary = el.querySelector(':scope > summary');
+            if (summary) walk(summary);
+            return;
+        }
+        if (el.nodeType === Node.TEXT_NODE) {
+            const t = el.textContent.trim();
+            if (t) blocks.push(t);
+            return;
+        }
+        if (tag === 'a' && el.href && INCLUDE_LINKS) {
+            const text = el.textContent.trim();
+            if (text) {
+                blocks.push(`[${text}](${el.href})`);
+                return;
+            }
+        }
+        for (const child of el.childNodes) walk(child);
+        const blockTags = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                         'li', 'tr', 'br', 'hr', 'section', 'article'];
+        if (blockTags.includes(tag)) blocks.push('\\n');
+    };
+    walk(node);
+    return blocks.join(' ').replace(/\\n\\s*\\n/g, '\\n\\n').trim();
+}
+"""
+
+
 async def _extract_text(
     page: Page,
     selector: Optional[str] = None,
     include_links: bool = True,
     max_length: int = MAX_CONTENT_LENGTH,
+    include_collapsed: bool = False,
 ) -> str:
-    """Extract readable text content from the page or a specific element."""
-    js_code = """
-    (root) => {
-        const node = root || document.body;
-        const blocks = [];
-        const walk = (el) => {
-            if (!el) return;
-            const tag = el.tagName ? el.tagName.toLowerCase() : '';
-            const skip = ['script', 'style', 'noscript', 'svg', 'path', 'nav', 'aside', 'header', 'footer'];
-            if (skip.includes(tag)) return;
-            if (el.nodeType === Node.TEXT_NODE) {
-                const t = el.textContent.trim();
-                if (t) blocks.push(t);
-                return;
-            }
-            if (tag === 'a' && el.href && INCLUDE_LINKS) {
-                const text = el.textContent.trim();
-                if (text) {
-                    blocks.push(`[${text}](${el.href})`);
-                    return;
-                }
-            }
-            for (const child of el.childNodes) walk(child);
-            const blockTags = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-                             'li', 'tr', 'br', 'hr', 'section', 'article'];
-            if (blockTags.includes(tag)) blocks.push('\\n');
-        };
-        walk(node);
-        return blocks.join(' ').replace(/\\n\\s*\\n/g, '\\n\\n').trim();
-    }
-    """.replace("INCLUDE_LINKS", "true" if include_links else "false")
+    """Extract readable text content from the page or a specific element.
+
+    include_collapsed reads closed <details> in full; the security scan needs that, reading tools don't.
+    """
+    js_code = (_JS_EXTRACT_TEMPLATE
+               .replace("INCLUDE_LINKS", "true" if include_links else "false")
+               .replace("INCLUDE_COLLAPSED", "true" if include_collapsed else "false"))
 
     if selector:
         element = await page.query_selector(selector)
@@ -356,13 +387,15 @@ async def comet_navigate(
     url: str,
     wait_for: str = "domcontentloaded",
 ) -> str:
-    """Navigate Comet to a specific URL.
+    """Navigate Comet to a specific URL in the active tab.
+
+    Use this to visit specific pages (docs, APIs, articles). For web searches,
+    prefer comet_search instead. Content is auto-sanitized for injection detection.
 
     Args:
         url: The URL to navigate to.
         wait_for: Wait condition -- 'load', 'domcontentloaded', or 'networkidle'.
     """
-    VALID_WAIT_FOR = ("load", "domcontentloaded", "networkidle")
     try:
         if wait_for not in VALID_WAIT_FOR:
             return f"Error: wait_for must be one of {VALID_WAIT_FOR}, got '{wait_for}'"
@@ -372,17 +405,9 @@ async def comet_navigate(
         final_url = page.url
         preview = await _extract_text(page, max_length=3000)
         combined = f"**Navigated to**: {final_url}\n**Title**: {title}\n\n**Preview** (first ~3000 chars):\n{preview}"
-        scan = _filter.sanitize(combined, final_url)
-        if scan.injection_detected:
-            print(f"⚠️ INJECTION on {final_url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return scan.text
+        return _sanitize_and_return(combined, final_url)
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        if "Timeout" in str(e):
-            return f"Error: Navigation timed out for {url}. {e}"
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e, f"Navigation to {url}")
 
 
 @mcp.tool()
@@ -391,12 +416,15 @@ async def comet_read_page(
     include_links: bool = True,
     max_length: int = 50000,
 ) -> str:
-    """Read the text content of the current page in Comet.
+    """Read the text content of the current page (or active tab) in Comet.
+
+    Use to drill into specific page sections or re-read content.
+    Content is auto-sanitized — if injections are detected, run comet_security_scan.
 
     Args:
-        selector: Optional CSS selector to read specific content.
+        selector: Optional CSS selector to read specific content (e.g. 'main').
         include_links: Whether to include href URLs from links.
-        max_length: Maximum characters to return.
+        max_length: Maximum characters to return (default 50000).
     """
     try:
         max_length = min(max(0, max_length), MAX_CONTENT_LENGTH)
@@ -410,23 +438,21 @@ async def comet_read_page(
             max_length=max_length,
         )
         combined = f"**Page**: {title}\n**URL**: {url}\n**Selector**: {selector or '(full page)'}\n\n---\n\n{text}"
-        scan = _filter.sanitize(combined, url)
-        if scan.injection_detected:
-            print(f"⚠️ INJECTION on {url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return scan.text
+        return _sanitize_and_return(combined, url)
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
 async def comet_screenshot(full_page: bool = False) -> str:
     """Take a screenshot of the current Comet page. Returns base64 PNG.
 
+    Uses raw CDP (not Playwright) to avoid font-renderer hangs. Useful for
+    visual verification after navigation or to capture charts/images that
+    text extraction misses.
+
     Args:
-        full_page: Whether to capture the full scrollable page.
+        full_page: Whether to capture the full scrollable page (not just viewport).
     """
     try:
         page = await _get_page()
@@ -447,19 +473,20 @@ async def comet_screenshot(full_page: bool = False) -> str:
             f"![screenshot](data:image/png;base64,{b64})"
         )
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
 async def comet_click(selector: str, wait_after: int = 2) -> str:
     """Click an element on the current Comet page.
 
+    Use 'text=...' for visible text matching (preferred over brittle CSS selectors).
+    Waits after click for page to settle. If element not found, returns error —
+    use comet_read_page first to verify the element exists.
+
     Args:
         selector: CSS selector or 'text=Something' for text matching.
-        wait_after: Seconds to wait after clicking.
+        wait_after: Seconds to wait after clicking (default 2).
     """
     try:
         page = await _get_page()
@@ -475,10 +502,7 @@ async def comet_click(selector: str, wait_after: int = 2) -> str:
             f"**URL**: {url}"
         )
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
@@ -490,11 +514,14 @@ async def comet_type(
 ) -> str:
     """Type text into an input field in the current Comet page.
 
+    For Perplexity searches, prefer comet_search (URL-based, no selectors needed).
+    Use this for form inputs on other sites. Clears the field by default before typing.
+
     Args:
         selector: CSS selector of the input field.
         text: Text to type into the field.
         press_enter: Whether to press Enter after typing.
-        clear_first: Whether to clear the field before typing.
+        clear_first: Whether to clear the field before typing (default true).
     """
     try:
         page = await _get_page()
@@ -509,10 +536,7 @@ async def comet_type(
             f"**Enter pressed**: {press_enter}"
         )
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
@@ -524,15 +548,14 @@ async def comet_tabs(
     """Manage tabs in the Comet browser.
 
     Args:
-        action: Tab action -- 'list', 'new', 'switch', 'close'.
-        tab_index: Tab index for 'switch' or 'close' (0-based).
-        url: URL for 'new' tab action.
+        action: 'list' (show all), 'new' (open tab), 'switch' (by index), 'close' (by index).
+        tab_index: Tab index for 'switch' or 'close' (0-based, from 'list' output).
+        url: URL for 'new' tab action (opens blank if omitted).
     """
-    VALID_ACTIONS = ("list", "new", "switch", "close")
     global _page
     try:
-        if action not in VALID_ACTIONS:
-            return f"Error: action must be one of {VALID_ACTIONS}, got '{action}'"
+        if action not in VALID_TAB_ACTIONS:
+            return f"Error: action must be one of {VALID_TAB_ACTIONS}, got '{action}'"
         browser = await _ensure_browser()
         contexts = browser.contexts
         if not contexts:
@@ -558,17 +581,17 @@ async def comet_tabs(
             return f"**Opened new tab**: {url or 'about:blank'}"
 
         elif action == "switch":
-            if tab_index is None or tab_index < 0 or tab_index >= len(pages):
+            if not _valid_tab_index(tab_index, pages):
                 return f"Error: Invalid tab index. Available: 0-{len(pages)-1}"
             try:
                 _page = pages[tab_index]
                 title = await _page.title()
                 return f"**Switched to tab [{tab_index}]**: {title} - {_page.url}"
-            except (IndexError, Exception) as tab_err:
+            except Exception as tab_err:
                 return f"Error: Tab {tab_index} is no longer available: {tab_err}"
 
         elif action == "close":
-            if tab_index is None or tab_index < 0 or tab_index >= len(pages):
+            if not _valid_tab_index(tab_index, pages):
                 return f"Error: Invalid tab index. Available: 0-{len(pages)-1}"
             if len(pages) <= 1:
                 return "Error: Cannot close the last tab."
@@ -580,23 +603,24 @@ async def comet_tabs(
                     remaining = contexts[0].pages
                     _page = remaining[-1] if remaining else None
                 return f"**Closed tab [{tab_index}]**: {title}"
-            except (IndexError, Exception) as tab_err:
+            except Exception as tab_err:
                 return f"Error: Tab {tab_index} is no longer available: {tab_err}"
 
         return f"Error: Unknown action '{action}'. Use: list, new, switch, close"
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
 async def comet_evaluate(expression: str) -> str:
     """Evaluate a JavaScript expression in the current Comet page.
 
+    Powerful but use with care — string results are sanitized for injection
+    detection. Use for DOM queries, data extraction, or page manipulation
+    that other tools don't cover.
+
     Args:
-        expression: JavaScript expression to evaluate in the page context.
+        expression: JavaScript expression to evaluate (e.g. 'document.title').
     """
     try:
         page = await _get_page()
@@ -605,15 +629,9 @@ async def comet_evaluate(expression: str) -> str:
             result_str = json.dumps(result, indent=2, ensure_ascii=False)
         else:
             result_str = str(result)
-        scan = _filter.sanitize(result_str, page.url)
-        if scan.injection_detected:
-            print(f"⚠️ INJECTION in eval on {page.url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return scan.text
+        return _sanitize_and_return(result_str, page.url)
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
@@ -652,8 +670,11 @@ async def comet_wait(
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def comet_security_scan() -> str:
-    """Deep security scan of current page. Detects hidden text,
-    CSS-invisible elements, injection attempts, suspicious content."""
+    """Deep security scan of current page for prompt injection and hidden content.
+
+    Run this when: content filter flags injections, page seems suspicious, or
+    you want to verify a page is clean before trusting its content. Checks
+    CSS-hidden elements, zero-width chars, HTML comments, and 39 injection patterns."""
     try:
         page = await _get_page()
         url = page.url
@@ -694,13 +715,16 @@ async def comet_security_scan() -> str:
         })()""")
 
         # 2. Scan visible content
-        visible_text = await _extract_text(page)
+        visible_text = await _extract_text(page, include_collapsed=True)
         visible_scan = _filter.sanitize(visible_text, url)
 
         # 3. Scan hidden elements for injections
         hidden_threats = []
         for el in (hidden_elements or []):
-            el_threats = _filter.detect_injections(el.get("text", ""))
+            raw_text = el.get("text", "")
+            # Check the raw text and the zero-width-stripped text: either form can carry the payload.
+            el_threats = (_filter.detect_injections(raw_text)
+                          or _filter.detect_injections(_filter.strip_hidden_content(raw_text)[0]))
             if el_threats:
                 hidden_threats.append({"element": el, "threats": el_threats})
 
@@ -740,7 +764,9 @@ async def comet_security_scan() -> str:
         for c in comments:
             report.append(f'  • "{c.get("text", "")[:80]}..."')
             # Check for injections in comments too
-            comment_threats = _filter.detect_injections(c.get("text", ""))
+            comment_text = c.get("text", "")
+            comment_threats = (_filter.detect_injections(comment_text)
+                               or _filter.detect_injections(_filter.strip_hidden_content(comment_text)[0]))
             if comment_threats:
                 report.append(f"    Injections found: {len(comment_threats)}")
 
@@ -749,10 +775,7 @@ async def comet_security_scan() -> str:
 
         return "\n".join(report)
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 # ---------------------------------------------------------------------------

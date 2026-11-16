@@ -160,6 +160,8 @@ ZERO_WIDTH_CHARS = {
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _EXCESSIVE_WHITESPACE_RE = re.compile(r"[ \t]{10,}")
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{20,}={0,2}")
+_ZERO_WIDTH_TABLE = str.maketrans({char: None for char in ZERO_WIDTH_CHARS})
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +197,8 @@ class ContentFilter:
 
     def detect_injections(self, text: str) -> list[ThreatMatch]:
         """Regex scan for injection patterns across all threat categories."""
+        if not text:
+            return []
         threats: list[ThreatMatch] = []
         for pattern, name, category in INJECTION_PATTERNS:
             for match in pattern.finditer(text):
@@ -214,8 +218,7 @@ class ContentFilter:
         original = text
 
         # Remove zero-width / invisible characters
-        for char in ZERO_WIDTH_CHARS:
-            text = text.replace(char, "")
+        text = text.translate(_ZERO_WIDTH_TABLE)
 
         # Remove HTML comments
         text = _HTML_COMMENT_RE.sub("", text)
@@ -266,9 +269,7 @@ class ContentFilter:
     def check_base64_payloads(self, text: str) -> list[ThreatMatch]:
         """Decode base64 strings and scan for hidden injections."""
         threats: list[ThreatMatch] = []
-        # Find base64-looking strings (20+ chars)
-        b64_pattern = re.compile(r"[A-Za-z0-9+/]{20,}={0,2}")
-        for match in b64_pattern.finditer(text):
+        for match in _BASE64_RE.finditer(text):
             candidate = match.group()
             try:
                 decoded = base64.b64decode(candidate, validate=True).decode("utf-8", errors="ignore")
