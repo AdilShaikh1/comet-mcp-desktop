@@ -507,7 +507,7 @@ async def test_playwright_connect():
         pages = ctx[0].pages if ctx else []
         record("playwright_connect", True,
                f"{len(ctx)} ctx, {len(pages)} pages", time.time() - t0)
-        await browser.close()
+        # Stop the driver only: the suite never closes the user's Comet (close() here would just disconnect).
         await pw.stop()
     except Exception as e:
         record("playwright_connect", False,

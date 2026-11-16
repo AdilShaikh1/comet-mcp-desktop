@@ -5,9 +5,9 @@ description = "MCP server connecting Claude Desktop/Code to Perplexity's Comet b
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 authors = [
-    { name = "Adil Shaikh", email = "AdiilShaikh@users.noreply.github.com" },
+    { name = "Adil Shaikh", email = "48984410+AdilShaikh1@users.noreply.github.com" },
 ]
 keywords = ["mcp", "comet", "perplexity", "claude", "browser", "cdp"]
 classifiers = [

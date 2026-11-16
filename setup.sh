@@ -11,12 +11,8 @@ echo ""
 uv --version 2>/dev/null || { echo "Error: uv is required. Install: https://docs.astral.sh/uv/"; exit 1; }
 
 # Install dependencies from pyproject.toml (uv manages the venv automatically)
-echo "1. Installing Python packages..."
+echo "Installing Python packages..."
 uv sync
-
-# Install Playwright's Chromium
-echo "2. Installing Playwright browser engine..."
-uv run playwright install chromium
 
 echo ""
 echo "=== Setup Complete ==="
