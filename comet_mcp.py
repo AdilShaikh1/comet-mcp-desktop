@@ -15,6 +15,7 @@ Usage:
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -54,6 +55,10 @@ MAX_WAIT_SECONDS = 120  # hard cap for any sleep/wait parameter
 VALID_SEARCH_MODES = ("search", "research")
 VALID_WAIT_FOR = ("load", "domcontentloaded", "networkidle")
 VALID_TAB_ACTIONS = ("list", "new", "switch", "close")
+VALID_FINANCE_MODES = ("market", "quote", "screener", "earnings", "predictions")
+FINANCE_BASE_URL = "https://www.perplexity.ai/finance"
+MAX_TICKER_CHARS = 20
+MAX_SCREENER_QUERY_CHARS = 500  # about 15 s of typing at 30 ms a key
 
 
 def _clamp_wait(value: int, default: int = 10) -> int:
@@ -428,6 +433,145 @@ async def comet_search(
         )
     except Exception as e:
         return _handle_error(e, "Search")
+
+
+@mcp.tool()
+async def comet_search_finance(
+    mode: str = "market",
+    ticker: Optional[str] = None,
+    query: Optional[str] = None,
+) -> str:
+    """Search Perplexity Finance for market data, stock quotes, or screener results.
+
+    Navigates the active tab to the appropriate Perplexity Finance page and
+    returns immediately. Call comet_read_page(selector="main") after ~3-5s to
+    retrieve the full data. Screener mode returns after typing the query.
+
+    Modes:
+    - "market": Dashboard — indices, sectors, movers, crypto, AI market summary
+    - "quote": Stock/ETF/crypto detail — price, P/E, EPS, 52W range, AI analysis
+    - "screener": Natural-language stock screener — type a query, get matches.
+      The screener runs on Perplexity's Computer feature.
+    - "earnings": Earnings calendar for the current week
+    - "predictions": Prediction markets (Polymarket) — rates, oil, elections
+
+    Args:
+        mode: One of 'market', 'quote', 'screener', 'earnings', 'predictions'.
+        ticker: Ticker symbol for 'quote' mode (e.g., 'NVDA', 'BTCUSD', 'XLK').
+        query: Natural language query for 'screener' mode
+            (e.g., 'semiconductor stocks with revenue growth > 20%').
+    """
+    try:
+        if mode not in VALID_FINANCE_MODES:
+            return f"Error: mode must be one of {VALID_FINANCE_MODES}, got '{mode}'"
+
+        if mode == "quote":
+            if not ticker or not ticker.strip():
+                return "Error: ticker is required for 'quote' mode (e.g., ticker='NVDA')."
+            ticker = ticker.strip().upper()
+            # Letters, digits, dots, hyphens and carets (^VIX), with at least one letter or digit:
+            # a ticker of only dots would resolve /finance/.. to the Perplexity home page.
+            if (not re.fullmatch(r"[A-Z0-9.\-^]+", ticker) or not any(ch.isalnum() for ch in ticker)
+                    or len(ticker) > MAX_TICKER_CHARS):
+                return f"Error: invalid ticker '{ticker}'. Use a symbol such as 'NVDA', 'BTCUSD' or '^VIX'."
+
+        if mode == "screener":
+            if not query or not query.strip():
+                return "Error: query is required for 'screener' mode."
+            # The query is typed key by key (30 ms each), so a long one would block the tool for minutes.
+            if len(query.strip()) > MAX_SCREENER_QUERY_CHARS:
+                return f"Error: screener query is longer than {MAX_SCREENER_QUERY_CHARS} characters."
+
+        page = await _get_page()
+
+        # Build the target URL
+        if mode == "market":
+            url = FINANCE_BASE_URL
+        elif mode == "quote":
+            url = f"{FINANCE_BASE_URL}/{ticker}"
+        elif mode == "screener":
+            url = f"{FINANCE_BASE_URL}/screener"
+        elif mode == "earnings":
+            url = f"{FINANCE_BASE_URL}/earnings"
+        elif mode == "predictions":
+            url = f"{FINANCE_BASE_URL}/predictions"
+
+        await page.goto(url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+
+        # For screener mode, type the query into the search input and submit.
+        # The screener uses a contenteditable div (role="textbox"), NOT a regular input.
+        # We use JS to find+focus it, then keyboard.type to enter the query.
+        if mode == "screener":
+            await asyncio.sleep(2)  # Wait for React hydration
+            typed_ok = False
+            # No try/except here: a lost connection must reach _handle_error, not read as "input not found".
+            # Use JS to find the textbox, focus it, and clear it
+            found = await page.evaluate("""() => {
+                    const el = document.querySelector('[role="textbox"]')
+                        || document.querySelector('[contenteditable="true"]')
+                        || document.querySelector('textarea')
+                        || document.querySelector('input[type="text"]');
+                    if (el) {
+                        el.focus();
+                        if (el.contentEditable === 'true') {
+                            el.textContent = '';
+                        } else {
+                            el.value = '';
+                        }
+                        return true;
+                    }
+                    return false;
+                }""")
+            if found:
+                await asyncio.sleep(0.3)
+                await page.keyboard.type(query.strip(), delay=30)
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Enter")
+                typed_ok = True
+
+            if not typed_ok:
+                return (
+                    f"**Finance screener opened**: {url}\n\n"
+                    f"Could not auto-type the query. The screener input was not found.\n"
+                    f"Use **comet_type** to enter the query manually, then "
+                    f"**comet_read_page(selector=\"main\")** for results."
+                )
+
+        title = await page.title()
+        final_url = page.url
+
+        # Wait hints per mode
+        wait_hints = {
+            "market": "~3-5s",
+            "quote": "~3-5s",
+            "screener": "~10-20s",
+            "earnings": "~3-5s",
+            "predictions": "~3-5s",
+        }
+
+        # Human-readable mode descriptions (conditional to avoid None.strip())
+        if mode == "quote":
+            label = f"Quote: {ticker} (price, fundamentals, AI daily analysis)"
+        elif mode == "screener":
+            label = f"Screener: \"{query.strip()}\""
+        elif mode == "earnings":
+            label = "Earnings calendar"
+        elif mode == "predictions":
+            label = "Prediction markets (Polymarket)"
+        else:
+            label = "Market dashboard (indices, sectors, movers, crypto, AI news, fixed income)"
+
+        # The page title is page-controlled text, so the result goes through the filter
+        return _sanitize_and_return(
+            f"**Finance ({mode})**: {label}\n"
+            f"**URL**: {final_url}\n"
+            f"**Title**: {title}\n\n"
+            f"Dynamic data is loading in the background.\n"
+            f"Call **comet_read_page(selector=\"main\")** in {wait_hints[mode]} to retrieve the data.",
+            final_url,
+        )
+    except Exception as e:
+        return _handle_error(e, f"Finance ({mode})")
 
 
 @mcp.tool()

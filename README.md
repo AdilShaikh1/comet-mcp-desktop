@@ -102,6 +102,7 @@ See [Configuration](docs/configuration.md) for full paths setup and environment 
 |------|-------------|
 | `comet_connect` | Connect to Comet via CDP (auto-launches if needed) |
 | `comet_search` | Start a Perplexity search in a new tab — returns at once, read the answer with `comet_read_page` |
+| `comet_search_finance` | Open a Perplexity Finance page (market, quote, screener, earnings, predictions) in the active tab — read it with `comet_read_page(selector="main")` |
 | `comet_navigate` | Navigate to any URL |
 | `comet_read_page` | Extract page text, with optional CSS selector |
 | `comet_screenshot` | Capture screenshot (base64 PNG) |
@@ -179,7 +180,7 @@ uv run python test_comet.py --with-browser
 |------|-------|----------|
 | **1a** Static Core | 11 | Syntax, imports, tool registration, async, error handling |
 | **1b** Static Filter | 9 | Injection detection, false positives, trust classification |
-| **2a** Live Browser | 17 | All 11 tools against a live Comet instance |
+| **2a** Live Browser | 17 | All 12 tools against a live Comet instance |
 | **2b** Live Filter | 8 | E2E injection/hidden text detection, security scan |
 
 </details>
@@ -239,7 +240,7 @@ The answer streams in after `comet_search` returns, so call `comet_read_page` af
 
 | Document | Description |
 |----------|-------------|
-| **[Tool Reference](docs/tool-reference.md)** | Full API docs for all 11 tools with parameters, defaults, and examples |
+| **[Tool Reference](docs/tool-reference.md)** | Full API docs for all 12 tools with parameters, defaults, and examples |
 | **[Security](docs/security.md)** | Web Content Trust Policy, threat categories, trust tiers, adding patterns |
 | **[Configuration](docs/configuration.md)** | Environment variables, platform support, MCP config, parameter validation |
 | **[Contributing](CONTRIBUTING.md)** | How to contribute, dev setup, code guidelines |

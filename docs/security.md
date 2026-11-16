@@ -13,6 +13,7 @@ Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──�
 | Tool | Filtered? | Reason |
 |------|-----------|--------|
 | `comet_search` | Yes | Tab URL only; the answer is filtered when `comet_read_page` reads it |
+| `comet_search_finance` | Yes | Mode label, URL and page title (the title is page-controlled); the finance data is filtered when `comet_read_page` reads it |
 | `comet_read_page` | Yes | Extracted page text |
 | `comet_navigate` | Yes | Preview text snippet |
 | `comet_evaluate` | Yes (strings only) | JS evaluation results may contain page content |

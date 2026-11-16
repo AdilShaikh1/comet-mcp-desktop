@@ -1,6 +1,6 @@
 # Tool Reference
 
-Complete API documentation for all 11 Comet MCP tools.
+Complete API documentation for all 12 Comet MCP tools.
 
 ---
 
@@ -48,6 +48,34 @@ Start a Perplexity search in a new tab. Navigates to `perplexity.ai/search?q=QUE
 - It returns the query, mode, tab index and URL, not the answer. That short result passes through the ContentFilter, and the answer is filtered when `comet_read_page` reads it
 - The answer streams in after `comet_search` returns. Call `comet_read_page` after about 15-20 s in search mode or 30-45 s in research mode
 - Each search opens its own tab (tagged `[search]` in `comet_tabs`); at most 5 search tabs are kept and the oldest is closed first
+
+---
+
+## `comet_search_finance`
+
+Open a Perplexity Finance page in the active tab. Like `comet_navigate`, it navigates the current tab (it does not open a new one) and returns at once with the mode label, final URL and page title. In `screener` mode it returns after typing the query.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mode` | `string` | `"market"` | `market`, `quote`, `screener`, `earnings` or `predictions` |
+| `ticker` | `string` | `null` | Symbol for `quote` mode, such as `NVDA`, `BTCUSD` or `^VIX` |
+| `query` | `string` | `null` | Natural-language query for `screener` mode |
+
+| Mode | Page | Wait before reading |
+|------|------|---------------------|
+| `market` | `/finance` dashboard: indices, sectors, movers, crypto, AI summary | ~3-5 s |
+| `quote` | `/finance/<ticker>`: price, fundamentals, AI analysis | ~3-5 s |
+| `screener` | `/finance/screener`: types the query and submits it | ~10-20 s |
+| `earnings` | `/finance/earnings`: earnings calendar | ~3-5 s |
+| `predictions` | `/finance/predictions`: Polymarket prediction markets | ~3-5 s |
+
+**Returns:** A short status text, not the data. Call `comet_read_page(selector="main")` after the wait hint to read the page.
+
+**Notes:**
+- Invalid `mode`, a missing or invalid `ticker` in `quote` mode and a missing `query` in `screener` mode return an error before the browser is touched
+- `screener` runs on Perplexity's Computer feature, so each query uses your Perplexity account
+- If the screener input cannot be found, the result says so and points to `comet_type`
+- The status result passes through the ContentFilter because the page title comes from the page
 
 ---
 
