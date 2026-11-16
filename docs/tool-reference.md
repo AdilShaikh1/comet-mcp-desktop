@@ -12,7 +12,7 @@ Connect to Comet via CDP. Auto-launches Comet if needed. **Call this before usin
 Parameters: none
 ```
 
-**Returns:** Connection status message with open tab count and active page title, followed by a short workflow guide (Search, Read, Tabs, Errors).
+**Returns:** Connection status message with open tab count and active page title (checked against the injection patterns and withheld when flagged), followed by a short workflow guide (Search, Read, Tabs, Errors).
 
 **Example response:**
 ```
@@ -125,7 +125,7 @@ Take a screenshot of the current page. Returns base64-encoded PNG.
 - Uses raw CDP `Page.captureScreenshot` instead of Playwright's `page.screenshot()`
 - This avoids a known issue where Playwright's font renderer hangs indefinitely over CDP on Comet
 - Returns base64-encoded PNG data
-- This tool does NOT pass through the ContentFilter; it returns the image plus the page title and URL unfiltered
+- The result does not pass through the ContentFilter. The page title is checked against the injection patterns and withheld when flagged, and the URL is unfiltered
 
 ---
 
@@ -141,7 +141,7 @@ Click an element on the current page.
 **Notes:**
 - Supports standard CSS selectors: `#id`, `.class`, `button`, `a[href="/path"]`
 - Supports Playwright text selectors: `text=Click me`
-- Returns the page title after clicking
+- Returns the page title after clicking. The title is checked against the injection patterns and withheld when flagged
 - Returns a descriptive error if the element is not found
 
 ---
@@ -185,6 +185,7 @@ Manage tabs in the Comet browser. Tabs opened by `comet_search` are tagged `[sea
 **Notes:**
 - At most 5 search tabs are kept; the oldest is closed first when a sixth search starts
 - Closing a search tab removes it from search tracking
+- Tab titles are checked against the injection patterns and withheld when flagged; URLs are unfiltered
 - Invalid `action` values return an error
 - Invalid or out-of-range `tab_index` returns a descriptive error
 - Tab operations include race condition handling (tabs may close between listing and switching)
