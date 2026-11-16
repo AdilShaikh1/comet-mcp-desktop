@@ -529,7 +529,12 @@ async def test_tool_comet_connect():
         from comet_mcp import comet_connect
         result = await comet_connect()
         result_str = str(result)
-        if "error" in result_str.lower() and "reconnect" in result_str.lower():
+        # Check the first line for errors — the preamble guide text
+        # contains "Error" and "reconnect" as instructions, not failures
+        first_line = result_str.split("\n")[0].lower()
+        if result_str.startswith("Connected"):
+            record("tool_comet_connect", True, result_str[:200], time.time() - t0)
+        elif "error" in first_line:
             record("tool_comet_connect", False, result_str[:200], time.time() - t0)
         else:
             record("tool_comet_connect", True, result_str[:200], time.time() - t0)
@@ -598,20 +603,27 @@ async def test_tool_comet_screenshot():
 async def test_tool_comet_search():
     t0 = time.time()
     try:
-        from comet_mcp import comet_search
+        from comet_mcp import comet_search, comet_read_page
+        # Async split: search returns immediately with tab info
         result = await comet_search(
             query="What is the Python programming language",
-            wait_seconds=8,
         )
         result_str = str(result)
-        if len(result_str) > 200:
-            record("tool_comet_search", True,
-                   f"Got results ({len(result_str)} chars)", time.time() - t0)
-        elif "error" in result_str.lower():
+        if "error" in result_str.lower() and "tab" not in result_str.lower():
             record("tool_comet_search", False, result_str[:300], time.time() - t0)
+            return
+        # Wait for Perplexity to stream the answer, then read
+        await asyncio.sleep(20)
+        read_result = await comet_read_page()
+        read_str = str(read_result)
+        if len(read_str) > 200:
+            record("tool_comet_search", True,
+                   f"Search+read OK ({len(read_str)} chars)", time.time() - t0)
+        elif "error" in read_str.lower():
+            record("tool_comet_search", False, read_str[:300], time.time() - t0)
         else:
             record("tool_comet_search", False,
-                   f"Response too short ({len(result_str)} chars)", time.time() - t0)
+                   f"Response too short ({len(read_str)} chars)", time.time() - t0)
     except Exception as e:
         record("tool_comet_search", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
@@ -864,11 +876,14 @@ async def test_e2e_filter_on_read_page():
 
 
 async def test_e2e_filter_on_search():
-    """Search Perplexity, verify filter runs."""
+    """Search Perplexity, verify filter runs on read_page after search."""
     t0 = time.time()
     try:
-        from comet_mcp import comet_search
-        result = await comet_search(query="What is Python", wait_seconds=8)
+        from comet_mcp import comet_search, comet_read_page
+        # Async split: fire search, wait, then read
+        await comet_search(query="What is Python")
+        await asyncio.sleep(20)
+        result = await comet_read_page()
         result_str = str(result)
         if "Source:" in result_str or "Trust:" in result_str or "\u2500\u2500\u2500\u2500" in result_str:
             record("e2e_filter_search", True, "Header present", time.time()-t0)
