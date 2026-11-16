@@ -1,250 +1,149 @@
-<p align="center">
-  <h1 align="center">Comet MCP Server</h1>
-  <p align="center">
-    <strong>Give Claude a browser that thinks.</strong>
-  </p>
-  <p align="center">
-    An MCP server connecting Claude Desktop/Code to Perplexity's Comet browser via Chrome DevTools Protocol.
-    <br />
-    Search the web with AI, navigate pages, read content, click elements, and take screenshots.
-  </p>
-  <p align="center">
-    <a href="#quick-start">Quick Start</a> &middot;
-    <a href="#available-tools">Tools</a> &middot;
-    <a href="docs/tool-reference.md">API Docs</a> &middot;
-    <a href="docs/security.md">Security</a> &middot;
-    <a href="docs/configuration.md">Configuration</a>
-  </p>
-</p>
+<h1 align="center">Comet MCP Desktop</h1>
 
-<br />
+<p align="center"><strong>Claude drives Perplexity's Comet browser through twelve&nbsp;MCP&nbsp;tools.</strong></p>
 
-> Rather than using static search APIs or overwhelming Claude's context with raw browser automation, Comet MCP **delegates browsing to Perplexity Comet**. Claude stays focused on your coding task while Comet handles navigation, dynamic content, and AI-powered research.
+<p align="center">An MCP server for Claude Desktop and&nbsp;Claude&nbsp;Code.<br>It connects to Comet over the Chrome DevTools Protocol and lets Claude search Perplexity, open pages, read them, click, type and take screenshots.</p>
 
-<br />
+<p align="center"><a href="#what-it-does">What&nbsp;it&nbsp;does</a>&nbsp;&nbsp; &nbsp;&nbsp;<a href="#install">Install</a>&nbsp;&nbsp; &nbsp;&nbsp;<a href="#usage">Usage</a>&nbsp;&nbsp; &nbsp;&nbsp;<a href="#common-questions">Common&nbsp;questions</a>&nbsp;&nbsp; &nbsp;&nbsp;<a href="#tests">Tests</a>&nbsp;&nbsp; &nbsp;&nbsp;<a href="#license">License</a></p>
 
-## How It Works
+## What it does
 
+The server talks to Claude over MCP stdio and to Comet over the Chrome DevTools Protocol (CDP), on port 9222 by default. Each tool acts in your own Comet window.
+
+`comet_search` opens a new tab for each query and returns at once. Perplexity streams the answer in that tab. Claude reads it with `comet_read_page` about 15 to 20 seconds later, or 30 to 45 seconds later in research mode. The server keeps at most 5 search tabs and closes the oldest first.
+
+The results of `comet_search`, `comet_search_finance`, `comet_navigate`, `comet_read_page` and `comet_evaluate` pass through a ContentFilter before Claude sees them. `comet_click`, `comet_screenshot` and `comet_tabs` return page titles and URLs without the filter. The filter strips hidden characters and HTML comments, scans for 39 prompt-injection patterns and starts the result with a header. The header names the source and its trust tier, or lists the patterns it found. [docs/security.md](docs/security.md) lists the patterns, the tiers and which tools are filtered.
+
+| Tool | What it does |
+| --- | --- |
+| `comet_connect` | Connects to Comet over CDP and starts Comet if it isn't running. Call it first. |
+| `comet_search` | Starts a Perplexity search in a new tab, in `search` or `research` mode. |
+| `comet_search_finance` | Opens a Perplexity Finance page in the active tab (market, quote, screener, earnings or predictions). |
+| `comet_navigate` | Opens a URL in the active tab and returns a text preview. |
+| `comet_read_page` | Reads the page text, or only the part a CSS selector matches. |
+| `comet_screenshot` | Takes a screenshot and returns it as a base64 PNG. |
+| `comet_click` | Clicks an element by CSS selector or by `text=...`. |
+| `comet_type` | Types into an input field. |
+| `comet_tabs` | Lists, opens, switches or closes tabs. |
+| `comet_evaluate` | Runs a JavaScript expression in the page. |
+| `comet_wait` | Waits for a selector to appear or for a number of seconds. |
+| `comet_security_scan` | Scans the page for hidden elements, HTML comments and injection patterns. |
+
+[docs/tool-reference.md](docs/tool-reference.md) documents every parameter and default.
+
+## When to reach for it
+
+Reach for it when Claude needs a Perplexity answer, a page that only loads in a real browser, or market data from Perplexity Finance. Once the server is configured, Claude picks the tools when a request needs the web. You can also name a tool in the request, for example "use comet_search to look up the latest uv release".
+
+The browsing tools work on any site. Use `comet_security_scan` on a page that looks suspicious before Claude acts on its content.
+
+## Install
+
+**Requirements.** The server needs Perplexity's [Comet](https://perplexity.ai/comet) browser on Windows or macOS, Python 3.10 or newer, and [uv](https://docs.astral.sh/uv/).
+
+**Start Comet with remote debugging.** The server reaches Comet on the CDP port, so Comet must run with `--remote-debugging-port=9222`. When Comet isn't running at all and the CDP URL points at this machine, the server starts it with the flag on the first tool call. When Comet is already open without the flag, quit it fully and start it with one of these commands. The server never closes or kills Comet.
+
+On Windows (PowerShell):
+
+```powershell
+& "$env:LOCALAPPDATA\Perplexity\Comet\Application\comet.exe" --remote-debugging-port=9222
 ```
-Claude Desktop/Code  ←── MCP (stdio) ──→  Comet MCP Server  ←── CDP (9222) ──→  Comet Browser
+
+On macOS:
+
+```bash
+/Applications/Comet.app/Contents/MacOS/Comet --remote-debugging-port=9222
 ```
 
-1. **Comet MCP Server** launches Comet with remote debugging on port 9222 when it is not already running, and never closes it
-2. Connects to Comet via **Chrome DevTools Protocol** using Playwright
-3. **Claude** communicates with the server over MCP stdio transport
-4. Claude can search, navigate, read, click, type, evaluate JS, and screenshot — all in your Comet browser
-
-<br />
-
-## Quick Start
-
-### 1. Configure Claude Desktop / Claude Code
-
-**Claude Desktop** — add to your config file:
-
-| Platform | Config path |
-|----------|------------|
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+**Claude Desktop.** Add the server to `claude_desktop_config.json`, then restart Claude Desktop. The file lives at `%APPDATA%\Claude\claude_desktop_config.json` on Windows and `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS.
 
 ```json
 {
   "mcpServers": {
     "comet": {
       "command": "uvx",
-      "args": ["comet-mcp-desktop"]
+      "args": ["--from", "git+https://github.com/AdilShaikh1/comet-mcp-desktop@v0.2.0", "comet-mcp-desktop"]
     }
   }
 }
 ```
 
-**Claude Code** — add to `~/.claude.json` or `.mcp.json` in your project root:
+**Claude Code.** Run:
 
-```json
-{
-  "mcpServers": {
-    "comet": {
-      "command": "uvx",
-      "args": ["comet-mcp-desktop"]
-    }
-  }
-}
+```bash
+claude mcp add comet -- uvx --from git+https://github.com/AdilShaikh1/comet-mcp-desktop@v0.2.0 comet-mcp-desktop
 ```
 
-> Requires [`uv`](https://docs.astral.sh/uv/). The MCP server and all dependencies install automatically on first run.
+Both configs pin the `v0.2.0` release tag. On first run, uvx installs the server from that tag and resolves its dependencies.
 
-### 2. Install Comet Browser
-
-Download and install [Perplexity Comet](https://perplexity.ai/comet).
-
-**That's it.** The server auto-launches Comet with remote debugging when needed.
-
-<details>
-<summary><strong>Manual setup from source</strong></summary>
-
-<br />
+**From source.** Clone the repo and run the server with uv:
 
 ```bash
 git clone https://github.com/AdilShaikh1/comet-mcp-desktop.git
 cd comet-mcp-desktop
 uv sync
+uv run comet-mcp-desktop
 ```
 
-See [Configuration](docs/configuration.md) for full paths setup and environment variables.
+The server then waits for an MCP client on stdio. [docs/configuration.md](docs/configuration.md) shows a client config that points at a clone, and it lists the environment variables (`COMET_CDP_URL`, `COMET_TIMEOUT`, `COMET_MAX_CONTENT` and `COMET_PATH`).
 
-</details>
+## Usage
 
-<br />
+Ask Claude for something on the web. Claude calls `comet_connect` once, then the tools the request needs.
 
-## Available Tools
+| You say | Claude calls |
+| --- | --- |
+| "Search Perplexity for the latest AI news" | `comet_search`, then `comet_read_page` once the answer has streamed in |
+| "Open Hacker News and summarize the front page" | `comet_navigate`, then `comet_read_page` |
+| "Click the first link and read the article" | `comet_click`, then `comet_read_page` |
+| "Show me the NVDA quote on Perplexity Finance" | `comet_search_finance` with `mode="quote"` and `ticker="NVDA"`, then `comet_read_page(selector="main")` |
+| "Take a screenshot of what you see" | `comet_screenshot` |
+| "Is this page safe?" | `comet_security_scan` |
 
-| Tool | Description |
-|------|-------------|
-| `comet_connect` | Connect to Comet via CDP (auto-launches if needed) |
-| `comet_search` | Start a Perplexity search in a new tab — returns at once, read the answer with `comet_read_page` |
-| `comet_search_finance` | Open a Perplexity Finance page (market, quote, screener, earnings, predictions) in the active tab — read it with `comet_read_page(selector="main")` |
-| `comet_navigate` | Navigate to any URL |
-| `comet_read_page` | Extract page text, with optional CSS selector |
-| `comet_screenshot` | Capture screenshot (base64 PNG) |
-| `comet_click` | Click elements by CSS selector or text |
-| `comet_type` | Type into input fields |
-| `comet_tabs` | List, open, switch, or close tabs |
-| `comet_evaluate` | Run JavaScript in the page context |
-| `comet_wait` | Wait for an element or a fixed delay |
-| `comet_security_scan` | Deep scan for hidden text and injection patterns |
+`comet_search_finance` has five modes. The `market`, `quote`, `earnings` and `predictions` pages are ready to read after about 3 to 5 seconds. The `screener` mode types a natural-language query into the Finance screener and submits it. The screener runs Perplexity's Computer feature, so each screener query uses your Perplexity account.
 
-> Full parameter documentation: **[Tool Reference](docs/tool-reference.md)**
+## Common questions
 
-<br />
+**Does it run on Linux?** No. Comet runs on Windows and macOS, and it has no Linux build.
 
-## Example Usage
+**Does it need a paid Perplexity plan?** Not for searches and Finance pages, which were tested on a free account. The screener mode was not tested on one.
 
-| You say | Claude does |
-|---------|-----------|
-| *"Search Perplexity for the latest AI news"* | `comet_search` + `comet_read_page` — the answer streams in after the search starts |
-| *"Open Hacker News and summarize the front page"* | `comet_navigate` + `comet_read_page` |
-| *"Click the first link and read the article"* | `comet_click` + `comet_read_page` |
-| *"Take a screenshot of what you see"* | `comet_screenshot` — captures via raw CDP |
-| *"Is this page safe?"* | `comet_security_scan` — checks for hidden text and injections |
+**What happens if Comet is already open without the flag?** The server doesn't start a second copy. `comet_connect` returns an error that says Comet is running but the CDP URL didn't accept a connection. Quit Comet fully, start it with `--remote-debugging-port=9222` and call `comet_connect` again. On a managed machine, the `RemoteDebuggingAllowed` policy can block remote debugging.
 
-<br />
+**The connection dropped mid-session. What now?** Call `comet_connect` again. It reconnects without restarting the server. The search tabs stay open in Comet, but the server stops tracking them.
 
-## Web Content Trust Policy
+**`comet_read_page` shows "Searching the web". Is it stuck?** The answer is still streaming. Wait a little longer and call `comet_read_page` again.
 
-All web content is sanitized through a `ContentFilter` before reaching Claude — defense-in-depth against prompt injection via web pages.
+**How does it compare with a search API or a browser automation server?** It covers both jobs in one server. `comet_search` hands the query to Perplexity and Claude reads the answer as text. The browsing tools open, click, type and read pages in Comet, and the ContentFilter checks the text the reading tools return.
 
-```
-Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──→  security header + cleaned text  ──→  Claude
-```
+## It's working if
 
-| Trust Tier | Criteria |
-|------------|----------|
-| **HIGH** | `.gov`, `.edu`, arxiv, bbc, reuters, nih |
-| **STANDARD** | Established companies, unknown clean domains |
-| **LOW** | wordpress, medium, reddit, quora |
-| **UNTRUSTED** | Injection patterns detected (auto-downgraded) |
+- `comet_connect` answers `Connected to Comet at http://localhost:9222`, followed by the open tab count and the active page.
+- A `comet_search` followed by `comet_read_page` returns an answer.
+- Text from a page starts with a `Source: <url> | Trust: <tier>` header, or with a security warning when the filter found an injection pattern.
 
-The filter scans for **39 injection patterns** across **12 threat categories** including direct injection, authority spoofing, data exfiltration, delimiter injection, and more.
+## Tests
 
-> Full details: **[Security Documentation](docs/security.md)**
+`uv run python test_comet.py` runs 24 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
 
-<br />
+`uv run python test_comet.py --with-browser` adds the live tier, for 50 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
 
-## How This Compares
+`--test NAME` runs one test, for example `uv run python test_comet.py --test finance_validation`. Results land in `test_results/`, which git ignores.
 
-| Feature | Search APIs | Browser MCPs | **Comet MCP** |
-|---------|------------|-------------|--------------|
-| AI-powered search | Varies | No | **Perplexity AI** |
-| Interactive browsing | No | Yes | **Yes** |
-| Context window impact | Low | High | **Low** |
-| Screenshots | No | Yes | **Yes** |
-| Security filtering | No | No | **Yes** |
-| Click/type/navigate | No | Yes | **Yes** |
+## Repository layout
 
-> Comet MCP gives Claude access to **Perplexity's AI search** with full browser control, while keeping Claude's context window clean through multi-agent delegation.
-
-<br />
-
-## Testing
-
-**45 tests** — 20 static + 25 end-to-end browser tests.
-
-```bash
-uv run python test_comet.py --with-browser
-```
-
-<details>
-<summary><strong>Test tier breakdown</strong></summary>
-
-| Tier | Tests | Coverage |
-|------|-------|----------|
-| **1a** Static Core | 11 | Syntax, imports, tool registration, async, error handling |
-| **1b** Static Filter | 9 | Injection detection, false positives, trust classification |
-| **2a** Live Browser | 17 | All 12 tools against a live Comet instance |
-| **2b** Live Filter | 8 | E2E injection/hidden text detection, security scan |
-
-</details>
-
-<br />
-
-## Troubleshooting
-
-<details>
-<summary><strong>"Could not connect to Comet"</strong></summary>
-
-The server launches Comet only when it is not running, and never closes or kills it. If it fails:
-- If Comet is already running without debugging, quit it fully and start it with `--remote-debugging-port=9222`
-- Check that Comet is installed (Windows and macOS only)
-- Set `COMET_PATH` env var for non-standard installs
-- On a managed machine, the `RemoteDebuggingAllowed` policy may block debugging
-- Verify: open `http://localhost:9222/json`
-
-</details>
-
-<details>
-<summary><strong>Screenshot hangs</strong></summary>
-
-Uses raw CDP `Page.captureScreenshot` to avoid Playwright font renderer hangs. Ensure you're on the latest version.
-
-</details>
-
-<details>
-<summary><strong>Connection lost</strong></summary>
-
-Call `comet_connect` to reconnect without restarting.
-
-</details>
-
-<details>
-<summary><strong>Slow search results</strong></summary>
-
-The answer streams in after `comet_search` returns, so call `comet_read_page` after about 15-20 s in search mode or 30-45 s in research mode.
-
-</details>
-
-<br />
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Runtime | Python 3.10+ with `uv` |
-| Browser automation | Playwright (CDP) |
-| MCP transport | `mcp[cli]` SDK (stdio) |
-| Screenshots | Raw CDP `Page.captureScreenshot` |
-| Content security | `ContentFilter` — 39 patterns, 12 categories |
-
-<br />
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| **[Tool Reference](docs/tool-reference.md)** | Full API docs for all 12 tools with parameters, defaults, and examples |
-| **[Security](docs/security.md)** | Web Content Trust Policy, threat categories, trust tiers, adding patterns |
-| **[Configuration](docs/configuration.md)** | Environment variables, platform support, MCP config, parameter validation |
-| **[Contributing](CONTRIBUTING.md)** | How to contribute, dev setup, code guidelines |
+- `comet_mcp.py`: the server and its 12 tools
+- `content_filter.py`: the ContentFilter and its injection patterns
+- `test_comet.py`: the static and live tests
+- `main.py`: a second entry point, `uv run python main.py`
+- `docs/`: the tool reference, the security notes and the configuration guide
+- `pyproject.toml` and `uv.lock`: the package config and the locked dependencies
+- `requirements.txt`: the dependency list in requirements format
+- `setup.sh`: runs `uv sync` and prints how to start Comet
+- `CHANGELOG.md`: the release notes
+- `CONTRIBUTING.md`: how to propose a change
+- `README.md`, `LICENSE`, `.gitignore`, `.gitattributes` and `.python-version`: this page, the MIT license and the repo settings
 
 ## License
 
-[MIT](LICENSE)
+This repo is MIT licensed (see LICENSE). Issues are welcome. Please describe what you asked Claude, what the server returned and what you expected.
