@@ -19,7 +19,7 @@ import subprocess
 import time
 import urllib.request
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import sys
 
@@ -33,7 +33,21 @@ _filter = ContentFilter()
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-CDP_URL = os.environ.get("COMET_CDP_URL", "http://localhost:9222")
+DEFAULT_CDP_PORT = 9222
+# A trailing slash would make the poll URL "//json/version", which DevTools does not serve.
+CDP_URL = os.environ.get("COMET_CDP_URL", f"http://localhost:{DEFAULT_CDP_PORT}").rstrip("/")
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")  # auto-launch only starts a local Comet
+
+
+def _port_of(url: str) -> int:
+    """Port named in a CDP URL, or the default when the URL has none."""
+    return urlparse(url).port or DEFAULT_CDP_PORT
+
+
+CDP_PORT = _port_of(CDP_URL)
+LAUNCH_POLL_ATTEMPTS = 20  # x LAUNCH_POLL_INTERVAL = 10 s when the port refuses; up to 30 s if it stalls
+LAUNCH_POLL_INTERVAL = 0.5  # s
+PROCESS_CHECK_TIMEOUT = 5  # s
 DEFAULT_TIMEOUT = int(os.environ.get("COMET_TIMEOUT", "30000"))  # ms
 MAX_CONTENT_LENGTH = int(os.environ.get("COMET_MAX_CONTENT", "50000"))  # chars
 MAX_WAIT_SECONDS = 120  # hard cap for any sleep/wait parameter
@@ -67,11 +81,17 @@ mcp = FastMCP("comet_mcp")
 # Helpers
 # ---------------------------------------------------------------------------
 def _find_comet_path() -> Optional[str]:
-    """Find Comet executable on Windows."""
+    """Find the Comet executable on Windows or macOS (Comet has no Linux build)."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    program_files = os.environ.get("PROGRAMFILES")
+    # Env-derived entries are skipped when the variable is unset, so no relative path is probed.
     candidates = [
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Perplexity", "Comet", "Application", "comet.exe"),
-        os.path.join(os.environ.get("PROGRAMFILES", ""), "Perplexity", "Comet", "Application", "comet.exe"),
-        os.environ.get("COMET_PATH", ""),
+        os.environ.get("COMET_PATH"),  # an explicit override wins
+        local_app_data and os.path.join(local_app_data, "Perplexity", "Comet", "Application", "comet.exe"),
+        local_app_data and os.path.join(local_app_data, "Perplexity", "Comet", "comet.exe"),  # reported, unverified
+        program_files and os.path.join(program_files, "Perplexity", "Comet", "Application", "comet.exe"),
+        "/Applications/Comet.app/Contents/MacOS/Comet",
+        "/Applications/Perplexity Comet.app/Contents/MacOS/comet",  # reported, unverified
     ]
     for path in candidates:
         if path and os.path.isfile(path):
@@ -79,50 +99,52 @@ def _find_comet_path() -> Optional[str]:
     return None
 
 
-def _kill_comet() -> None:
-    """Kill all running Comet processes."""
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "comet.exe"],
-            capture_output=True,
-        )
-    else:
-        subprocess.run(["pkill", "-f", "comet"], capture_output=True)
-
-
-async def _launch_comet(port: int = 9222, force: bool = False) -> bool:
-    """Launch Comet with remote debugging enabled.
-
-    If force=True, kills any existing Comet process first to ensure
-    CDP is available on the specified port.
-    """
-    path = _find_comet_path()
-    if not path:
-        return False
-    if force:
-        _kill_comet()
-        await asyncio.sleep(2)
+def _comet_running() -> bool:
+    """True if a Comet process exists. Used only to avoid a second launch, never to kill."""
     try:
-        creation_flags = 0
-        if hasattr(subprocess, "DETACHED_PROCESS"):
-            creation_flags = subprocess.DETACHED_PROCESS
-        subprocess.Popen(
-            [path, f"--remote-debugging-port={port}"],
-            creationflags=creation_flags,
-        )
-        for _ in range(20):
-            try:
-                urllib.request.urlopen(f"http://localhost:{port}/json", timeout=1)
-                return True
-            except Exception:
-                await asyncio.sleep(0.5)
+        if sys.platform == "win32":
+            # Full path: a bare name would let a tasklist.exe in the current folder run first.
+            tasklist = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tasklist.exe")
+            result = subprocess.run(
+                [tasklist, "/FI", "IMAGENAME eq comet.exe", "/NH"],
+                capture_output=True, text=True, timeout=PROCESS_CHECK_TIMEOUT,
+            )
+            return "comet.exe" in result.stdout.lower()
+        if sys.platform == "darwin":
+            return subprocess.run(
+                ["pgrep", "-ix", "comet"], capture_output=True, timeout=PROCESS_CHECK_TIMEOUT,
+            ).returncode == 0
     except Exception:
         pass
     return False
 
 
+async def _launch_comet(path: str) -> bool:
+    """Start Comet detached with remote debugging; True once the CDP endpoint answers.
+
+    Raises ConnectionError when the executable cannot be started at all.
+    """
+    try:
+        # Comet must not hold the MCP stdio pipes: they carry the JSON-RPC stream.
+        subprocess.Popen(
+            [path, f"--remote-debugging-port={CDP_PORT}"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),  # Windows
+            start_new_session=True,  # POSIX; ignored on Windows
+        )
+    except OSError as error:
+        raise ConnectionError(f"Could not start Comet at {path}: {error}") from error
+    for _ in range(LAUNCH_POLL_ATTEMPTS):
+        try:
+            urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=1)
+            return True
+        except Exception:
+            await asyncio.sleep(LAUNCH_POLL_INTERVAL)
+    return False
+
+
 async def _ensure_browser() -> Browser:
-    """Connect to Comet via CDP. Auto-launch if needed."""
+    """Connect to Comet via CDP, launching it only when it is not already running."""
     global _playwright, _browser, _page
     if _browser and _browser.is_connected():
         return _browser
@@ -139,30 +161,36 @@ async def _ensure_browser() -> Browser:
 
     _playwright = await async_playwright().start()
 
-    # Try: direct connect → auto-launch → force-restart with CDP
-    strategies = [
-        (None, "Direct CDP connection failed"),
-        (lambda: _launch_comet(), "Comet launched but CDP connection failed"),
-        (lambda: _launch_comet(force=True), "Force-restarted Comet but CDP connection failed"),
-    ]
-    last_error = None
-    for launcher, err_msg in strategies:
-        if launcher:
-            launched = await launcher()
-            if not launched:
-                continue
-        try:
-            _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
-            return _browser
-        except Exception as e:
-            last_error = f"{err_msg}: {e}"
-            if launcher:
-                break  # Comet started but refused CDP: stop here rather than escalate to a force-restart
+    try:
+        _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
+        return _browser
+    except Exception as error:
+        # First line only: Playwright errors carry a long call log after it.
+        connect_error = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
 
-    raise ConnectionError(
-        f"Could not connect to Comet at {CDP_URL}. "
-        f"Make sure Comet is installed. Last error: {last_error}"
-    )
+    if urlparse(CDP_URL).hostname not in LOCAL_HOSTS:
+        raise ConnectionError(f"Could not connect to Comet at {CDP_URL} ({connect_error}).")
+    # A second launch would only open a window in the running instance, so ask the user instead.
+    if _comet_running():
+        raise ConnectionError(
+            f"Comet is running but {CDP_URL} did not accept a connection ({connect_error}). "
+            f"If Comet was started without remote debugging, quit it fully and start it with "
+            f"--remote-debugging-port={CDP_PORT}; on a managed machine the RemoteDebuggingAllowed "
+            "policy may block debugging."
+        )
+    path = _find_comet_path()
+    if not path:
+        raise ConnectionError(
+            "Comet not found. Set COMET_PATH to the Comet executable; "
+            "Comet runs on Windows and macOS only."
+        )
+    if not await _launch_comet(path):
+        raise ConnectionError(
+            f"Launched Comet but {CDP_URL} did not answer. "
+            "The RemoteDebuggingAllowed policy may block remote debugging."
+        )
+    _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
+    return _browser
 
 
 async def _get_page() -> Page:

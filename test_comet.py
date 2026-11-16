@@ -12,9 +12,14 @@ import json
 import sys
 import os
 import time
+import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
+
+DEFAULT_CDP_PORT = 9222
+CDP_URL = os.environ.get("COMET_CDP_URL", f"http://localhost:{DEFAULT_CDP_PORT}")
 
 RESULTS_DIR = Path("test_results")
 RESULTS_DIR.mkdir(exist_ok=True)
@@ -156,7 +161,7 @@ def test_tools_are_async():
 def test_helper_functions():
     """Verify helper functions exist."""
     t0 = time.time()
-    helpers = ["_ensure_browser", "_get_page", "_find_comet_path"]
+    helpers = ["_ensure_browser", "_get_page", "_find_comet_path", "_comet_running"]
     try:
         if "comet_mcp" in sys.modules:
             del sys.modules["comet_mcp"]
@@ -168,6 +173,52 @@ def test_helper_functions():
             record("helper_functions", True, duration=time.time() - t0)
     except Exception as e:
         record("helper_functions", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+def test_cdp_port_parsing():
+    """CDP_PORT comes from the URL, falling back to 9222 when the URL has no port."""
+    t0 = time.time()
+    try:
+        import comet_mcp as mod
+        got = (mod._port_of("http://localhost:9333"), mod._port_of("http://localhost"))
+        record("cdp_port_parsing", got == (9333, 9222), f"got {got}", time.time() - t0)
+    except Exception as e:
+        record("cdp_port_parsing", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+def test_comet_path_override_first():
+    """COMET_PATH wins over every probed install path, even when a probed install exists."""
+    t0 = time.time()
+    saved = {name: os.environ.get(name) for name in ("COMET_PATH", "LOCALAPPDATA")}
+    try:
+        import comet_mcp as mod
+        with tempfile.TemporaryDirectory() as fake_local_app_data:
+            # A fake install at the first probed path, so the check fails if COMET_PATH is not checked first.
+            probed_install = os.path.join(fake_local_app_data, "Perplexity", "Comet", "Application", "comet.exe")
+            override = os.path.join(fake_local_app_data, "override-comet.exe")
+            os.makedirs(os.path.dirname(probed_install))
+            for fake_executable in (probed_install, override):
+                Path(fake_executable).touch()
+            os.environ["LOCALAPPDATA"] = fake_local_app_data
+            os.environ["COMET_PATH"] = override
+            found = mod._find_comet_path()
+        record("comet_path_override_first", found == override, f"got {found}", time.time() - t0)
+    except Exception as e:
+        record("comet_path_override_first", False, f"{type(e).__name__}: {e}", time.time() - t0)
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_no_process_kill():
+    """The server must never kill the user's browser."""
+    t0 = time.time()
+    source = _read_source("comet_mcp.py")
+    found = [word for word in ("taskkill", "pkill", "_kill_comet") if word in source]
+    record("no_process_kill", not found, f"found: {found}" if found else "", time.time() - t0)
 
 
 def test_error_handling():
@@ -484,7 +535,7 @@ def test_tools_use_filter():
 
 
 # ============================================================
-# TIER 2: Live browser tests (Comet must be running on :9222)
+# TIER 2: Live browser tests (Comet must be running at COMET_CDP_URL, default :9222)
 # ============================================================
 
 async def test_cdp_connection():
@@ -492,7 +543,7 @@ async def test_cdp_connection():
     t0 = time.time()
     try:
         import urllib.request
-        resp = urllib.request.urlopen("http://localhost:9222/json", timeout=3)
+        resp = urllib.request.urlopen(f"{CDP_URL}/json", timeout=3)
         data = json.loads(resp.read())
         if isinstance(data, list) and len(data) > 0:
             record("cdp_connection", True,
@@ -511,7 +562,7 @@ async def test_playwright_connect():
     try:
         from playwright.async_api import async_playwright
         pw = await async_playwright().start()
-        browser = await pw.chromium.connect_over_cdp("http://localhost:9222")
+        browser = await pw.chromium.connect_over_cdp(CDP_URL)
         ctx = browser.contexts
         pages = ctx[0].pages if ctx else []
         record("playwright_connect", True,
@@ -1016,6 +1067,9 @@ def run_static_tests(test_filter=None):
         ("tool_registration", test_tool_registration),
         ("tools_are_async", test_tools_are_async),
         ("helper_functions", test_helper_functions),
+        ("cdp_port_parsing", test_cdp_port_parsing),
+        ("comet_path_override_first", test_comet_path_override_first),
+        ("no_process_kill", test_no_process_kill),
         ("error_handling", test_error_handling),
         ("no_hardcoded_selectors", test_no_hardcoded_selectors),
         ("url_based_search", test_url_based_search),
@@ -1039,13 +1093,13 @@ def run_static_tests(test_filter=None):
 
 
 async def run_browser_tests(test_filter=None):
-    print("\n🌐 TIER 2: Live Browser Tests (Comet on :9222)")
+    print(f"\n🌐 TIER 2: Live Browser Tests (Comet at {CDP_URL})")
     print("=" * 50)
     # CDP check is always required for browser tests
     cdp_ok = await test_cdp_connection()
     if not cdp_ok:
         print("  ⚠️  CDP unreachable — skipping remaining browser tests")
-        print("  💡 Launch Comet: comet.exe --remote-debugging-port=9222")
+        print(f"  💡 Launch Comet: comet.exe --remote-debugging-port={urlparse(CDP_URL).port or DEFAULT_CDP_PORT}")
         return
     browser_tests = [
         ("playwright_connect", test_playwright_connect),
