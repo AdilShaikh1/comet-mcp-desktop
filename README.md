@@ -29,7 +29,7 @@
 Claude Desktop/Code  ←── MCP (stdio) ──→  Comet MCP Server  ←── CDP (9222) ──→  Comet Browser
 ```
 
-1. **Comet MCP Server** auto-launches Comet with remote debugging on port 9222
+1. **Comet MCP Server** launches Comet with remote debugging on port 9222 when it is not already running, and never closes it
 2. Connects to Comet via **Chrome DevTools Protocol** using Playwright
 3. **Claude** communicates with the server over MCP stdio transport
 4. Claude can search, navigate, read, click, type, evaluate JS, and screenshot — all in your Comet browser
@@ -191,10 +191,11 @@ uv run python test_comet.py --with-browser
 <details>
 <summary><strong>"Could not connect to Comet"</strong></summary>
 
-Comet is auto-launched, but if it fails:
-- Check that Comet is installed
-- Check port 9222 is free
+The server launches Comet only when it is not running, and never closes or kills it. If it fails:
+- If Comet is already running without debugging, quit it fully and start it with `--remote-debugging-port=9222`
+- Check that Comet is installed (Windows and macOS only)
 - Set `COMET_PATH` env var for non-standard installs
+- On a managed machine, the `RemoteDebuggingAllowed` policy may block debugging
 - Verify: open `http://localhost:9222/json`
 
 </details>
