@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 DEFAULT_CDP_PORT = 9222
+MIN_FINANCE_BODY_CHARS = 200  # live probe: market main ~5k chars, quote ~20k; an empty page is ~30
 CDP_URL = os.environ.get("COMET_CDP_URL", f"http://localhost:{DEFAULT_CDP_PORT}")
 
 RESULTS_DIR = Path("test_results")
@@ -104,11 +105,12 @@ def test_mcp_server_object():
 
 
 def test_tool_registration():
-    """Verify all 11 expected tools exist as functions in the module."""
+    """Verify all 12 expected tools exist as functions in the module."""
     t0 = time.time()
     expected = [
         "comet_connect",
         "comet_search",
+        "comet_search_finance",
         "comet_navigate",
         "comet_read_page",
         "comet_screenshot",
@@ -136,7 +138,7 @@ def test_tools_are_async():
     """Verify all tool functions are async."""
     t0 = time.time()
     tools = [
-        "comet_connect", "comet_search", "comet_navigate",
+        "comet_connect", "comet_search", "comet_search_finance", "comet_navigate",
         "comet_read_page", "comet_screenshot", "comet_click",
         "comet_type", "comet_tabs", "comet_evaluate", "comet_wait",
         "comet_security_scan",
@@ -515,6 +517,45 @@ def test_security_scan_tool_exists():
         record("security_scan_tool", False, f"{type(e).__name__}: {e}", time.time()-t0)
 
 
+def test_finance_validation():
+    """Bad finance arguments return an Error string before any browser call."""
+    t0 = time.time()
+    try:
+        if "comet_mcp" in sys.modules:
+            del sys.modules["comet_mcp"]
+        import comet_mcp
+        bad_calls = {
+            "bad_mode": {"mode": "nope"},
+            "quote_no_ticker": {"mode": "quote"},
+            "quote_invalid_ticker": {"mode": "quote", "ticker": "NV DA"},
+            "quote_only_dots": {"mode": "quote", "ticker": ".."},
+            "quote_underscore": {"mode": "quote", "ticker": "AB_C"},
+            "screener_no_query": {"mode": "screener"},
+            "screener_query_too_long": {"mode": "screener", "query": "x" * (comet_mcp.MAX_SCREENER_QUERY_CHARS + 1)},
+        }
+
+        async def no_browser():
+            raise RuntimeError("validation let a bad call reach the browser")
+
+        # Keep this static test offline even if validation regresses: a real _get_page would connect or launch.
+        real_get_page = comet_mcp._get_page
+        comet_mcp._get_page = no_browser
+        not_errors = []
+        try:
+            for label, kwargs in bad_calls.items():
+                result = asyncio.run(comet_mcp.comet_search_finance(**kwargs))
+                if not (isinstance(result, str) and result.startswith("Error:")):
+                    not_errors.append(f"{label}: {str(result)[:80]}")
+        finally:
+            comet_mcp._get_page = real_get_page
+        if not_errors:
+            record("finance_validation", False, f"No Error: {not_errors}", time.time() - t0)
+        else:
+            record("finance_validation", True, f"{len(bad_calls)} bad inputs rejected", time.time() - t0)
+    except Exception as e:
+        record("finance_validation", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
 def test_tools_use_filter():
     """Verify filtered tools reference ContentFilter."""
     t0 = time.time()
@@ -677,6 +718,32 @@ async def test_tool_comet_search():
                    f"Response too short ({len(read_str)} chars)", time.time() - t0)
     except Exception as e:
         record("tool_comet_search", False,
+               f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+async def test_tool_comet_search_finance():
+    """Market and quote pages load and read back. Screener is never submitted (it runs Perplexity Computer)."""
+    t0 = time.time()
+    try:
+        from comet_mcp import comet_search_finance, comet_read_page
+        checks = (("market", None, None), ("quote", "NVDA", "NVIDIA"))
+        for mode, ticker, expected_text in checks:
+            result = str(await comet_search_finance(mode=mode, ticker=ticker))
+            if result.startswith("Error"):
+                record("tool_comet_search_finance", False, f"{mode}: {result[:200]}", time.time() - t0)
+                return
+            await asyncio.sleep(5)  # the hint says ~3-5s for dynamic data
+            page_text = str(await comet_read_page(selector="main"))
+            # Check the body only: the header above "---" carries the page title, which names the ticker.
+            body = page_text.split("\n---\n", 1)[-1].strip()
+            if len(body) < MIN_FINANCE_BODY_CHARS or (expected_text and expected_text not in body):
+                record("tool_comet_search_finance", False,
+                       f"{mode}: body {len(body)} chars or missing {expected_text!r}",
+                       time.time() - t0)
+                return
+        record("tool_comet_search_finance", True, "market + quote read back", time.time() - t0)
+    except Exception as e:
+        record("tool_comet_search_finance", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
 
 
@@ -1085,6 +1152,7 @@ def run_static_tests(test_filter=None):
         ("sanitize_pipeline", test_sanitize_full_pipeline),
         ("security_scan_tool", test_security_scan_tool_exists),
         ("tools_use_filter", test_tools_use_filter),
+        ("finance_validation", test_finance_validation),
     ]
     for name, func in static_tests:
         if test_filter and test_filter != name:
@@ -1108,6 +1176,7 @@ async def run_browser_tests(test_filter=None):
         ("tool_comet_navigate", test_tool_comet_navigate),
         ("tool_comet_read_page", test_tool_comet_read_page),
         ("tool_comet_search", test_tool_comet_search),
+        ("tool_comet_search_finance", test_tool_comet_search_finance),
         ("tool_comet_tabs", test_tool_comet_tabs),
         ("tool_comet_click", test_tool_comet_click),
         ("tool_comet_click_nonexistent", test_tool_comet_click_nonexistent),
