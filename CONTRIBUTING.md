@@ -16,7 +16,6 @@ PRs without a related issue may be closed.
 git clone https://github.com/AdilShaikh1/comet-mcp-desktop.git
 cd comet-mcp-desktop
 uv sync
-uv run playwright install chromium
 ```
 
 ## Testing

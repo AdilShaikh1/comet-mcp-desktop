@@ -88,7 +88,6 @@ Download and install [Perplexity Comet](https://perplexity.ai/comet).
 git clone https://github.com/AdilShaikh1/comet-mcp-desktop.git
 cd comet-mcp-desktop
 uv sync
-uv run playwright install chromium
 ```
 
 See [Configuration](docs/configuration.md) for full paths setup and environment variables.
@@ -227,7 +226,7 @@ Perplexity answers take 5-15 seconds. Default `wait_seconds=10`. Increase to 15-
 
 | Component | Technology |
 |-----------|-----------|
-| Runtime | Python 3.14+ with `uv` |
+| Runtime | Python 3.10+ with `uv` |
 | Browser automation | Playwright (CDP) |
 | MCP transport | `mcp[cli]` SDK (stdio) |
 | Screenshots | Raw CDP `Page.captureScreenshot` |
