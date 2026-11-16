@@ -12,33 +12,42 @@ Connect to Comet via CDP. Auto-launches Comet if needed. **Call this before usin
 Parameters: none
 ```
 
-**Returns:** Connection status message with open tab count and active page title.
+**Returns:** Connection status message with open tab count and active page title, followed by a short workflow guide (Search, Read, Tabs, Errors).
 
 **Example response:**
 ```
 Connected to Comet at http://localhost:9222
 Open tabs: 3
 Active page: Example Domain
+
+## Comet Workflow Guide
+**Search**: comet_search starts a search and returns immediately (new tab per query, max 5). ...
+**Read**: Call comet_read_page after ~30-45s (research) or ~15-20s (search) to get results. ...
+**Tabs**: Each search gets its own tab (tagged [search] in comet_tabs list). ...
+**Errors**: 'connection lost' -> call comet_connect again. ...
 ```
+
+**Notes:**
+- Reconnecting forgets the tracked search tabs but leaves them open in Comet.
 
 ---
 
 ## `comet_search`
 
-Search the web using Perplexity. Navigates to `perplexity.ai/search?q=QUERY` and extracts AI-generated results. Uses URL-based navigation — no CSS selectors needed.
+Start a Perplexity search in a new tab. Navigates to `perplexity.ai/search?q=QUERY` and returns at once with the tab index and URL. Uses URL-based navigation — no CSS selectors needed.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | `string` | *required* | The search query (URL-encoded automatically) |
-| `wait_seconds` | `int` | `10` | Seconds to wait for AI response generation (clamped to 0-120) |
 | `mode` | `string` | `"search"` | Search mode: `search` or `research` |
 
 **Notes:**
 - The query is automatically URL-encoded via `urllib.parse.quote()`
 - Empty queries are rejected with an error
 - Invalid `mode` values return an error
-- Results pass through the ContentFilter before being returned
-- Perplexity answers typically take 5-15 seconds to generate
+- It returns the query, mode, tab index and URL, not the answer. That short result passes through the ContentFilter, and the answer is filtered when `comet_read_page` reads it
+- The answer streams in after `comet_search` returns. Call `comet_read_page` after about 15-20 s in search mode or 30-45 s in research mode
+- Each search opens its own tab (tagged `[search]` in `comet_tabs`); at most 5 search tabs are kept and the oldest is closed first
 
 ---
 
@@ -128,7 +137,7 @@ Type text into an input field.
 
 ## `comet_tabs`
 
-Manage tabs in the Comet browser.
+Manage tabs in the Comet browser. Tabs opened by `comet_search` are tagged `[search]` in the `list` output.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -140,12 +149,14 @@ Manage tabs in the Comet browser.
 
 | Action | Required params | Description |
 |--------|----------------|-------------|
-| `list` | none | List all open tabs with index, title, and URL |
+| `list` | none | List all open tabs with index, title, and URL; search tabs carry a `[search]` tag |
 | `new` | `url` (optional) | Open a new tab, optionally navigating to a URL |
 | `switch` | `tab_index` | Switch to the tab at the given index |
 | `close` | `tab_index` | Close the tab at the given index |
 
 **Notes:**
+- At most 5 search tabs are kept; the oldest is closed first when a sixth search starts
+- Closing a search tab removes it from search tracking
 - Invalid `action` values return an error
 - Invalid or out-of-range `tab_index` returns a descriptive error
 - Tab operations include race condition handling (tabs may close between listing and switching)
@@ -191,6 +202,7 @@ Wait for a specific element or a fixed duration. At least one parameter must be 
 
 **Notes:**
 - If both parameters are `null`, returns an error
+- `comet_search` returns before the answer is ready, so wait with `comet_wait` or a fixed delay, then call `comet_read_page`
 - If both are provided, waits for the selector (seconds is ignored)
 - Selector wait uses Playwright's `wait_for_selector` with the configured timeout
 - Fixed delay is clamped to `MAX_WAIT_SECONDS` (120) to prevent DoS

@@ -54,6 +54,8 @@ def _clamp_wait(value: int, default: int = 10) -> int:
 _playwright = None
 _browser: Optional[Browser] = None
 _page: Optional[Page] = None
+_search_tabs: list[dict] = []  # [{query, page, url}]
+MAX_SEARCH_TABS = 5
 
 # ---------------------------------------------------------------------------
 # MCP Server
@@ -276,9 +278,14 @@ async def _extract_text(
 async def comet_connect() -> str:
     """Connect to the Comet browser via CDP. Auto-launches Comet if needed.
 
-    Call this before using any other comet tool.
+    ALWAYS call this first before using any other comet tool. On success,
+    returns connection info plus a workflow guide for optimal results.
+
+    If connection is lost mid-session, call this again to reconnect.
     """
     try:
+        # Page handles from an old connection are unusable; forget them but leave the tabs open in Comet.
+        _search_tabs.clear()
         browser = await _ensure_browser()
         contexts = browser.contexts
         pages = contexts[0].pages if contexts else []
@@ -287,99 +294,112 @@ async def comet_connect() -> str:
         return (
             f"Connected to Comet at {CDP_URL}\n"
             f"Open tabs: {len(pages)}\n"
-            f"Active page: {title}"
+            f"Active page: {title}\n"
+            f"\n"
+            f"## Comet Workflow Guide\n"
+            f"**Search**: comet_search starts a search and returns immediately (new tab per query, max {MAX_SEARCH_TABS}). "
+            f"Use mode='research' for complex queries. Perplexity streams the answer in the background.\n"
+            f"**Read**: Call comet_read_page after ~30-45s (research) or ~15-20s (search) to get results. "
+            f"Use comet_security_scan on any page that seems suspicious.\n"
+            f"**Tabs**: Each search gets its own tab (tagged [search] in comet_tabs list). "
+            f"Use comet_tabs to list/switch/close. Oldest search tab auto-closes at cap.\n"
+            f"**Errors**: 'connection lost' → call comet_connect again. "
+            f"'timed out' → call comet_connect to reconnect."
         )
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e)
 
 
 @mcp.tool()
 async def comet_search(
     query: str,
-    wait_seconds: int = 10,
     mode: str = "search",
 ) -> str:
-    """Search the web using Perplexity via Comet.
+    """Start a Perplexity search in a new tab and return immediately.
 
-    Navigates to perplexity.ai/search?q=QUERY and extracts the AI-generated
-    results. No CSS selectors needed -- uses URL-based navigation.
+    Opens a NEW TAB, navigates to the search URL, and returns as soon as the
+    page begins loading. Perplexity streams the answer in the background tab.
+    Call comet_read_page after ~30-45s to retrieve the full answer.
+
+    This async-split design avoids MCP timeout issues on Cowork/cloud sessions.
+    Each search gets its own tab (max 5, oldest auto-closed via FIFO).
+
+    Workflow: comet_connect → comet_search → (wait 30-45s) → comet_read_page
+    → comet_security_scan (if suspicious).
 
     Args:
         query: The search query.
-        wait_seconds: Seconds to wait for AI response generation.
-        mode: Search mode -- 'search' or 'research'.
+        mode: 'search' (quick answers, wait ~15s) or 'research' (deep analysis
+            with Gemini thinking, wait ~30-45s before calling comet_read_page).
     """
     try:
-        if mode not in ("search", "research"):
-            return f"Error: mode must be 'search' or 'research', got '{mode}'"
+        if mode not in VALID_SEARCH_MODES:
+            return f"Error: mode must be one of {VALID_SEARCH_MODES}, got '{mode}'"
         if not query or not query.strip():
             return "Error: query must not be empty."
-        page = await _get_page()
-        wait_seconds = _clamp_wait(wait_seconds, default=10)
-        search_url = f"https://www.perplexity.ai/search?q={quote(query, safe='')}"
-        if mode == "research":
-            search_url += "&mode=research"
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        global _page
+        browser = await _ensure_browser()
+        contexts = browser.contexts
+        if not contexts:
+            raise RuntimeError("No browser contexts found. Is Comet open?")
 
-        # Wait for the AI answer to render instead of blind sleep
+        # FIFO eviction: close oldest search tab if at cap
+        while len(_search_tabs) >= MAX_SEARCH_TABS:
+            oldest = _search_tabs.pop(0)
+            try:
+                if not oldest["page"].is_closed():
+                    await oldest["page"].close()
+            except Exception:
+                pass
+
+        # Open a new tab for this search
+        page = await contexts[0].new_page()
+        _page = page
         try:
-            await page.wait_for_selector(
-                '[class*="prose"], [class*="thread"]',
-                timeout=wait_seconds * 1000,
-            )
-            # Allow extra time for streaming to finish
-            await asyncio.sleep(min(wait_seconds, 5))
+            search_url = f"https://www.perplexity.ai/search?q={quote(query, safe='')}"
+            if mode == "research":
+                search_url += "&mode=research"
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
         except Exception:
-            # Fall through -- extract whatever is available
-            await asyncio.sleep(wait_seconds)
+            # Close orphan tab on navigation failure to prevent leaks
+            try:
+                await page.close()
+            except Exception:
+                pass
+            raise
 
-        # Verify we actually landed on a search result page
+        # Track the tab before checking where it landed, so even a redirected tab counts toward the cap
         url = page.url
-        if "/search" not in url:
-            return f"Error: Perplexity did not navigate to search results. Current URL: {url}"
+        _search_tabs.append({
+            "query": query,
+            "page": page,
+            "url": url,
+        })
 
-        title = await page.title()
-        text = await _extract_text(page, selector="main", include_links=True)
+        # The URL comes from the page, so it goes through the filter like any other page text
+        if "/search" not in url and "/session/" not in url:
+            return _sanitize_and_return(
+                f"Warning: Perplexity did not navigate to search results.\n"
+                f"Current URL: {url}\n"
+                f"The page may have redirected (e.g., login). "
+                f"Check with comet_read_page to see the current page state.",
+                url,
+            )
 
-        # Extract external sources (from main content only, not sidebar)
-        sources = await page.evaluate("""
-            (() => {
-                const main = document.querySelector('main');
-                if (!main) return [];
-                const links = Array.from(main.querySelectorAll('a[href]'));
-                return links
-                    .filter(a => a.href.startsWith('http') && !a.href.includes('perplexity.ai'))
-                    .map(a => ({ text: a.textContent.trim(), url: a.href }))
-                    .filter(l => l.text.length > 0)
-                    .slice(0, 20);
-            })()
-        """)
-
-        result = (
-            f"## Search Results\n"
-            f"**Query**: {query}\n"
-            f"**Page Title**: {title}\n"
+        wait_hint = "~30-45s" if mode == "research" else "~15-20s"
+        # Look the tab up by identity: concurrent searches make "last page" unreliable
+        tab_index = contexts[0].pages.index(page)
+        return _sanitize_and_return(
+            f"**Search started**: {query}\n"
+            f"**Mode**: {mode}\n"
+            f"**Tab**: [{tab_index}] (tagged [search])\n"
             f"**URL**: {url}\n\n"
-            f"---\n\n{text}"
+            f"Perplexity is streaming the answer in the background.\n"
+            f"Call **comet_read_page** in {wait_hint} to retrieve the full results.",
+            url,
         )
-        if sources:
-            result += "\n\n## Sources\n"
-            for s in sources:
-                result += f"- [{s['text']}]({s['url']})\n"
-        scan = _filter.sanitize(result, url)
-        if scan.injection_detected:
-            print(f"⚠️ INJECTION on {url}: {len(scan.threats)} patterns", file=sys.stderr)
-        return scan.text
     except Exception as e:
-        error_type = type(e).__name__
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        if "Timeout" in str(e):
-            return f"Error: Search timed out. Try increasing wait_seconds. {e}"
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e, "Search")
 
 
 @mcp.tool()
@@ -418,7 +438,12 @@ async def comet_read_page(
 ) -> str:
     """Read the text content of the current page (or active tab) in Comet.
 
-    Use to drill into specific page sections or re-read content.
+    PRIMARY USE: Call this after comet_search to retrieve the streamed answer.
+    Wait ~30-45s (research mode) or ~15-20s (search mode) before calling.
+    If the answer is still loading ("Searching the web" in output), wait
+    longer and call again.
+
+    Also use to drill into specific page sections or re-read content.
     Content is auto-sanitized — if injections are detected, run comet_security_scan.
 
     Args:
@@ -545,7 +570,12 @@ async def comet_tabs(
     tab_index: Optional[int] = None,
     url: Optional[str] = None,
 ) -> str:
-    """Manage tabs in the Comet browser.
+    """Manage tabs in the Comet browser. Each comet_search opens a new tab
+    (tagged [search] in list output). Use 'list' to see all tabs, 'switch' to
+    go back to a previous search result, 'close' to free memory.
+
+    Tab hygiene: list tabs periodically and close old ones. Max 5 search tabs
+    are kept (oldest auto-closed). Closing a tab removes it from search tracking.
 
     Args:
         action: 'list' (show all), 'new' (open tab), 'switch' (by index), 'close' (by index).
@@ -563,14 +593,16 @@ async def comet_tabs(
         pages = contexts[0].pages
 
         if action == "list":
+            search_pages = {entry["page"] for entry in _search_tabs}
             lines = []
             for i, p in enumerate(pages):
                 active = " <- active" if p == _page else ""
+                search = " [search]" if p in search_pages else ""
                 try:
                     title = await p.title()
                 except Exception:
                     title = "(untitled)"
-                lines.append(f"  [{i}] {title} - {p.url}{active}")
+                lines.append(f"  [{i}] {title} - {p.url}{active}{search}")
             return f"**Open tabs** ({len(pages)}):\n" + "\n".join(lines)
 
         elif action == "new":
@@ -599,6 +631,8 @@ async def comet_tabs(
                 target = pages[tab_index]
                 title = await target.title()
                 await target.close()
+                # Remove from search tab registry if tracked
+                _search_tabs[:] = [e for e in _search_tabs if e["page"] != target]
                 if _page == target:
                     remaining = contexts[0].pages
                     _page = remaining[-1] if remaining else None
@@ -639,11 +673,15 @@ async def comet_wait(
     selector: Optional[str] = None,
     seconds: Optional[int] = None,
 ) -> str:
-    """Wait for a specific element or a fixed duration.
+    """Wait for a specific element to appear or a fixed duration.
+
+    Use after comet_click or comet_navigate when content loads asynchronously.
+    Provide either selector OR seconds, not both. comet_search returns before the answer is ready, so wait with comet_wait or a fixed
+    delay, then call comet_read_page.
 
     Args:
-        selector: CSS selector to wait for.
-        seconds: Fixed seconds to wait.
+        selector: CSS selector to wait for (e.g. 'div.results').
+        seconds: Fixed seconds to wait (0-120).
     """
     try:
         page = await _get_page()
@@ -657,12 +695,7 @@ async def comet_wait(
         else:
             return "Error: Provide either 'selector' or 'seconds'."
     except Exception as e:
-        error_type = type(e).__name__
-        if "Timeout" in str(e):
-            return f"**Timeout**: Element '{selector}' did not appear. {e}"
-        if "closed" in str(e).lower():
-            return "Error: Browser connection lost. Use comet_connect to reconnect."
-        return f"Error ({error_type}): {e}"
+        return _handle_error(e, f"Waiting for '{selector}'" if selector else "")
 
 
 # ---------------------------------------------------------------------------

@@ -101,7 +101,7 @@ See [Configuration](docs/configuration.md) for full paths setup and environment 
 | Tool | Description |
 |------|-------------|
 | `comet_connect` | Connect to Comet via CDP (auto-launches if needed) |
-| `comet_search` | Search via Perplexity — returns AI-generated results |
+| `comet_search` | Start a Perplexity search in a new tab — returns at once, read the answer with `comet_read_page` |
 | `comet_navigate` | Navigate to any URL |
 | `comet_read_page` | Extract page text, with optional CSS selector |
 | `comet_screenshot` | Capture screenshot (base64 PNG) |
@@ -120,7 +120,7 @@ See [Configuration](docs/configuration.md) for full paths setup and environment 
 
 | You say | Claude does |
 |---------|-----------|
-| *"Search Perplexity for the latest AI news"* | `comet_search` — waits for Perplexity, returns AI-synthesized answer |
+| *"Search Perplexity for the latest AI news"* | `comet_search` + `comet_read_page` — the answer streams in after the search starts |
 | *"Open Hacker News and summarize the front page"* | `comet_navigate` + `comet_read_page` |
 | *"Click the first link and read the article"* | `comet_click` + `comet_read_page` |
 | *"Take a screenshot of what you see"* | `comet_screenshot` — captures via raw CDP |
@@ -216,7 +216,7 @@ Call `comet_connect` to reconnect without restarting.
 <details>
 <summary><strong>Slow search results</strong></summary>
 
-Perplexity answers take 5-15 seconds. Default `wait_seconds=10`. Increase to 15-20 for complex queries.
+The answer streams in after `comet_search` returns, so call `comet_read_page` after about 15-20 s in search mode or 30-45 s in research mode.
 
 </details>
 
