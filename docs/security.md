@@ -1,6 +1,6 @@
 # Web Content Trust Policy
 
-All web content returned by the Comet MCP server passes through a server-side `ContentFilter` that sanitizes content before it reaches Claude. This implements defense-in-depth against prompt injection via web pages.
+Page content returned by the reading tools passes through a server-side `ContentFilter` that sanitizes content before it reaches Claude. This implements defense-in-depth against prompt injection via web pages.
 
 ## Architecture
 
@@ -16,12 +16,12 @@ Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──�
 | `comet_search_finance` | Yes | Mode label, URL and page title (the title is page-controlled); the finance data is filtered when `comet_read_page` reads it |
 | `comet_read_page` | Yes | Extracted page text |
 | `comet_navigate` | Yes | Preview text snippet |
-| `comet_evaluate` | Yes (strings only) | JS evaluation results may contain page content |
-| `comet_screenshot` | No | Binary image data (raw CDP capture) |
+| `comet_evaluate` | Yes | Every result; objects and lists are JSON-encoded first |
+| `comet_screenshot` | No | Returns the image plus the page title and URL unfiltered |
 | `comet_connect` | No | Connection status only |
-| `comet_click` | No | Action confirmation only |
+| `comet_click` | No | Returns the page title and URL unfiltered |
 | `comet_type` | No | Action confirmation only |
-| `comet_tabs` | No | Tab metadata only |
+| `comet_tabs` | No | Returns tab titles and URLs unfiltered |
 | `comet_wait` | No | Wait confirmation only |
 | `comet_security_scan` | Internal | Uses filter internally for deep analysis |
 
@@ -194,4 +194,4 @@ Guidelines:
 - Use `re.compile(r"(?i)...")` for case-insensitive matching
 - Always include `\b` word boundaries to minimize false positives
 - **Never delete a pattern** — tighten it instead if it causes false positives
-- Test with: `uv run python test_comet.py --with-browser`
+- Test with: `uv run python test_comet.py` (the static tier tests the filter patterns)

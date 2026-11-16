@@ -20,26 +20,31 @@ uv sync
 
 ## Testing
 
-All testing is end-to-end against a live Comet browser instance.
+The suite has a static tier that needs no browser and a live tier that runs against Comet.
 
 ```bash
-# Full suite (20 static + 25 browser = 45 tests)
+# Static tests only (24 tests, no browser)
+uv run python test_comet.py
+
+# Static and live tests (50 tests), against a Comet started with the flag
 uv run python test_comet.py --with-browser
 
-# Run a specific test
+# Run one test
 uv run python test_comet.py --with-browser --test tool_comet_search
 ```
 
-Comet is auto-launched by the test suite. If auto-launch fails, start it manually:
+The test suite doesn't start Comet. Start it with remote debugging before a live run:
 
 ```powershell
 & "$env:LOCALAPPDATA\Perplexity\Comet\Application\comet.exe" --remote-debugging-port=9222
 ```
 
+When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
+
 ## Code Guidelines
 
 - **Never hardcode Perplexity CSS selectors** - they break on every UI update
-- **Use URL-based search** - `page.goto(f"https://www.perplexity.ai/search?q={quote(query)}")`
+- **Use URL-based search** - `page.goto(f"https://www.perplexity.ai/search?q={quote(query, safe='')}")`
 - **All tools must be async** with try/except error handling
 - **Validate all parameters** - enum rejection, numeric clamping, max_length caps
 - **Screenshots use raw CDP** - not Playwright's `page.screenshot()` (hangs on Comet)

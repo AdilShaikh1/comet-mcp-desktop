@@ -11,7 +11,7 @@ Add to your Claude Desktop or Claude Code config:
   "mcpServers": {
     "comet": {
       "command": "uvx",
-      "args": ["comet-mcp-desktop"]
+      "args": ["--from", "git+https://github.com/AdilShaikh1/comet-mcp-desktop@v0.2.0", "comet-mcp-desktop"]
     }
   }
 }
@@ -39,7 +39,7 @@ If running from source, use full paths:
 }
 ```
 
-> On macOS/Linux use `.venv/bin/python` instead of `.venv/Scripts/python.exe`.
+> On macOS use `.venv/bin/python` instead of `.venv/Scripts/python.exe`.
 
 ### Config file locations
 
@@ -68,7 +68,7 @@ All environment variables are optional. The server works with defaults out of th
   "mcpServers": {
     "comet": {
       "command": "uvx",
-      "args": ["comet-mcp-desktop"],
+      "args": ["--from", "git+https://github.com/AdilShaikh1/comet-mcp-desktop@v0.2.0", "comet-mcp-desktop"],
       "env": {
         "COMET_TIMEOUT": "60000",
         "COMET_MAX_CONTENT": "100000"
@@ -83,7 +83,7 @@ All environment variables are optional. The server works with defaults out of th
 $env:COMET_PATH = "C:\Custom\Path\comet.exe"
 ```
 
-**System-wide (macOS/Linux):**
+**System-wide (macOS):**
 ```bash
 export COMET_PATH="/custom/path/comet"
 ```

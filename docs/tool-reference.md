@@ -91,7 +91,7 @@ Navigate Comet to a specific URL.
 **Notes:**
 - Invalid `wait_for` values return an error
 - Returns a text preview of the loaded page (filtered through ContentFilter)
-- The preview is truncated to `COMET_MAX_CONTENT` characters
+- The preview is capped at 3000 characters
 
 ---
 
@@ -106,9 +106,9 @@ Read text content from the current page.
 | `max_length` | `int` | `50000` | Maximum characters to return (capped at `COMET_MAX_CONTENT`) |
 
 **Notes:**
-- Without a selector, extracts `document.body.innerText`
+- Without a selector, walks the page body and skips script, style, nav, aside, header, footer and closed `<details>` blocks
 - With a selector, extracts text from matching elements only
-- When `include_links` is true, appends a link reference section
+- When `include_links` is true, writes each link inline as `[text](href)`
 - Content passes through the ContentFilter before being returned
 
 ---
@@ -125,7 +125,7 @@ Take a screenshot of the current page. Returns base64-encoded PNG.
 - Uses raw CDP `Page.captureScreenshot` instead of Playwright's `page.screenshot()`
 - This avoids a known issue where Playwright's font renderer hangs indefinitely over CDP on Comet
 - Returns base64-encoded PNG data
-- This tool does NOT pass through the ContentFilter (binary image data)
+- This tool does NOT pass through the ContentFilter; it returns the image plus the page title and URL unfiltered
 
 ---
 
@@ -158,7 +158,7 @@ Type text into an input field.
 | `clear_first` | `bool` | `true` | Whether to clear the field before typing |
 
 **Notes:**
-- When `clear_first` is true, the field is triple-clicked (select all) then filled
+- When `clear_first` is true, the field is emptied with `fill(selector, "")` before typing
 - `press_enter` is useful for submitting search forms
 
 ---
@@ -201,8 +201,8 @@ Execute JavaScript in the page context.
 
 **Notes:**
 - Runs in the context of the current page
-- String results pass through the ContentFilter (may contain web content)
-- Non-string results (numbers, objects) are returned as-is
+- Results pass through the ContentFilter (they may contain web content)
+- Objects and lists are JSON-encoded; every result is turned into a string and passed through the ContentFilter
 - Syntax errors are caught and returned as descriptive error messages
 
 **Examples:**
@@ -253,17 +253,17 @@ Parameters: none
 
 **Example response:**
 ```
-Security Deep Scan
+🔍 DEEP SECURITY SCAN: https://example.com/
 ════════════════════════════════════════
-URL: https://example.com
-Trust tier: standard
 
-Visible text analysis:
-  Length: 1256 chars
-  Injections found: 0
+Page Trust Tier: standard
 
-Hidden elements found: 0
-HTML comments found: 0
+Visible Content:
+  Injection patterns: 0 found
+
+Hidden Elements: 0 found
+
+HTML Comments: 0 suspicious
 
 Overall: CLEAN
 ════════════════════════════════════════

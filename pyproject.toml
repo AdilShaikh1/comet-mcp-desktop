@@ -1,6 +1,6 @@
 [project]
 name = "comet-mcp-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server connecting Claude Desktop/Code to Perplexity's Comet browser via Chrome DevTools Protocol"
 readme = "README.md"
 license = "MIT"
