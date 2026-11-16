@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `comet_connect`, `comet_screenshot`, `comet_click` and `comet_tabs` check page titles against the filter's injection patterns and withhold a flagged title. URLs are shown as they are. (#8)
+
 ## 0.2.0 (2026-11-16)
 
 The first tagged release. It ships 12 tools. The council tools were left out of this release.

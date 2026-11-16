@@ -17,11 +17,11 @@ Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──�
 | `comet_read_page` | Yes | Extracted page text |
 | `comet_navigate` | Yes | Preview text snippet |
 | `comet_evaluate` | Yes | Every result; objects and lists are JSON-encoded first |
-| `comet_screenshot` | No | Returns the image plus the page title and URL unfiltered |
-| `comet_connect` | No | Connection status only |
-| `comet_click` | No | Returns the page title and URL unfiltered |
+| `comet_screenshot` | Title only | The page title is checked and withheld when flagged; the URL is unfiltered |
+| `comet_connect` | Title only | The active page title is checked and withheld when flagged; the rest is connection status |
+| `comet_click` | Title only | The page title is checked and withheld when flagged; the URL is unfiltered |
 | `comet_type` | No | Action confirmation only |
-| `comet_tabs` | No | Returns tab titles and URLs unfiltered |
+| `comet_tabs` | Title only | Each tab title is checked and withheld when flagged; URLs are unfiltered |
 | `comet_wait` | No | Wait confirmation only |
 | `comet_security_scan` | Internal | Uses filter internally for deep analysis |
 

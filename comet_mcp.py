@@ -238,6 +238,21 @@ def _sanitize_and_return(text: str, url: str) -> str:
     return scan.text
 
 
+def _safe_title(title: str) -> str:
+    """Clean a page title, or withhold it when it matches an injection pattern.
+
+    Titles are page-controlled, but wrapping a whole tool result in the filter would add a header
+    and scan the screenshot's base64, so only the title goes through it.
+    """
+    cleaned, _ = _filter.strip_hidden_content(title)
+    # Scan the stripped and the raw text, as comet_security_scan does.
+    threats = _filter.detect_injections(cleaned) or _filter.detect_injections(title)
+    if threats:
+        print(f"⚠️ INJECTION in page title: {len(threats)} patterns", file=sys.stderr)
+        return f"[title withheld: {len(threats)} injection pattern(s); run comet_security_scan]"
+    return cleaned
+
+
 _JS_EXTRACT_TEMPLATE = """
 (root) => {
     const node = root || document.body;
@@ -327,7 +342,7 @@ async def comet_connect() -> str:
         return (
             f"Connected to Comet at {CDP_URL}\n"
             f"Open tabs: {len(pages)}\n"
-            f"Active page: {title}\n"
+            f"Active page: {_safe_title(title)}\n"
             f"\n"
             f"## Comet Workflow Guide\n"
             f"**Search**: comet_search starts a search and returns immediately (new tab per query, max {MAX_SEARCH_TABS}). "
@@ -665,7 +680,7 @@ async def comet_screenshot(full_page: bool = False) -> str:
             await cdp.detach()
         title = await page.title()
         return (
-            f"**Screenshot of**: {title}\n"
+            f"**Screenshot of**: {_safe_title(title)}\n"
             f"**URL**: {page.url}\n\n"
             f"![screenshot](data:image/png;base64,{b64})"
         )
@@ -695,7 +710,7 @@ async def comet_click(selector: str, wait_after: int = 2) -> str:
         url = page.url
         return (
             f"**Clicked**: {selector}\n"
-            f"**Current page**: {title}\n"
+            f"**Current page**: {_safe_title(title)}\n"
             f"**URL**: {url}"
         )
     except Exception as e:
@@ -774,7 +789,7 @@ async def comet_tabs(
                     title = await p.title()
                 except Exception:
                     title = "(untitled)"
-                lines.append(f"  [{i}] {title} - {p.url}{active}{search}")
+                lines.append(f"  [{i}] {_safe_title(title)} - {p.url}{active}{search}")
             return f"**Open tabs** ({len(pages)}):\n" + "\n".join(lines)
 
         elif action == "new":
@@ -790,7 +805,7 @@ async def comet_tabs(
             try:
                 _page = pages[tab_index]
                 title = await _page.title()
-                return f"**Switched to tab [{tab_index}]**: {title} - {_page.url}"
+                return f"**Switched to tab [{tab_index}]**: {_safe_title(title)} - {_page.url}"
             except Exception as tab_err:
                 return f"Error: Tab {tab_index} is no longer available: {tab_err}"
 
@@ -808,7 +823,7 @@ async def comet_tabs(
                 if _page == target:
                     remaining = contexts[0].pages
                     _page = remaining[-1] if remaining else None
-                return f"**Closed tab [{tab_index}]**: {title}"
+                return f"**Closed tab [{tab_index}]**: {_safe_title(title)}"
             except Exception as tab_err:
                 return f"Error: Tab {tab_index} is no longer available: {tab_err}"
 
