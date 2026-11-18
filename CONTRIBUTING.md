@@ -23,10 +23,10 @@ uv sync
 The suite has a static tier that needs no browser and a live tier that runs against Comet.
 
 ```bash
-# Static tests only (25 tests, no browser)
+# Static tests only (26 tests, no browser)
 uv run python test_comet.py
 
-# Static and live tests (52 tests), against a Comet started with the flag
+# Static and live tests (53 tests), against a Comet started with the flag
 uv run python test_comet.py --with-browser
 
 # Run one test
@@ -45,7 +45,7 @@ When the CDP port doesn't answer, the run records `cdp_connection` as failed and
 
 - **Never hardcode Perplexity CSS selectors** - they break on every UI update
 - **Use URL-based search** - `page.goto(f"https://www.perplexity.ai/search?q={quote(query, safe='')}")`
-- **All tools must be async** with try/except error handling
+- **All tools must be async** with try/except error handling. A failure leaves a tool as a `ToolError` (`raise _handle_error(e) from e`, or `raise ToolError(...)` for a rejected parameter), never as a returned "Error..." string
 - **Validate all parameters** - enum rejection, numeric clamping, max_length caps
 - **Screenshots use raw CDP** - not Playwright's `page.screenshot()` (hangs on Comet)
 - **Use `uv` exclusively** - never pip, conda, or bare python

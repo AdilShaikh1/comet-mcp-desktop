@@ -2,11 +2,13 @@
 
 Complete API documentation for all 12 Comet MCP tools.
 
+**Errors.** A failed call is an MCP tool error, with `is_error=True` and the message as its text. The client shows it as `Error executing tool <name>: <message>`. Bad parameters, a lost connection and a timeout all fail this way, so the notes below only say what is rejected.
+
 ---
 
 ## `comet_connect`
 
-Connect to a running Comet via CDP. The server never starts Comet, so start it with `--remote-debugging-port` first. When the connection fails, the error returns the command that starts Comet. **Call this before using any other tool.**
+Connect to a running Comet via CDP. The server never starts Comet, so start it with `--remote-debugging-port` first. When the connection fails, the tool error carries the command that starts Comet. **Call this before using any other tool.**
 
 ```
 Parameters: none
@@ -43,8 +45,8 @@ Start a Perplexity search in a new tab. Navigates to `perplexity.ai/search?q=QUE
 
 **Notes:**
 - The query is automatically URL-encoded via `urllib.parse.quote()`
-- Empty queries are rejected with an error
-- Invalid `mode` values return an error
+- Empty queries are rejected
+- Invalid `mode` values are rejected
 - It returns the query, mode, tab index and URL, not the answer. That short result passes through the ContentFilter, and the answer is filtered when `comet_read_page` reads it
 - The answer streams in after `comet_search` returns. Call `comet_read_page` after about 15-20 s in search mode or 30-45 s in research mode
 - Each search opens its own tab (tagged `[search]` in `comet_tabs`); at most 5 search tabs are kept and the oldest is closed first
@@ -72,7 +74,7 @@ Open a Perplexity Finance page in the active tab. Like `comet_navigate`, it navi
 **Returns:** A short status text, not the data. Call `comet_read_page(selector="main")` after the wait hint to read the page.
 
 **Notes:**
-- Invalid `mode`, a missing or invalid `ticker` in `quote` mode and a missing `query` in `screener` mode return an error before the browser is touched
+- Invalid `mode`, a missing or invalid `ticker` in `quote` mode and a missing `query` in `screener` mode are rejected before the browser is touched
 - `screener` runs on Perplexity's Computer feature, so each query uses your Perplexity account
 - If the screener input cannot be found, the result says so and points to `comet_type`
 - The status result passes through the ContentFilter because the page title comes from the page
@@ -89,7 +91,7 @@ Navigate Comet to a specific URL.
 | `wait_for` | `string` | `"domcontentloaded"` | Wait condition: `load`, `domcontentloaded`, or `networkidle` |
 
 **Notes:**
-- Invalid `wait_for` values return an error
+- Invalid `wait_for` values are rejected
 - Returns a text preview of the loaded page (filtered through ContentFilter)
 - The preview is capped at 3000 characters
 
@@ -142,7 +144,7 @@ Click an element on the current page.
 - Supports standard CSS selectors: `#id`, `.class`, `button`, `a[href="/path"]`
 - Supports Playwright text selectors: `text=Click me`
 - Returns the page title after clicking. The title is checked against the injection patterns and withheld when flagged
-- Returns a descriptive error if the element is not found
+- Fails with a descriptive message if the element is not found
 
 ---
 
@@ -186,8 +188,8 @@ Manage tabs in the Comet browser. Tabs opened by `comet_search` are tagged `[sea
 - At most 5 search tabs are kept; the oldest is closed first when a sixth search starts
 - Closing a search tab removes it from search tracking
 - Tab titles are checked against the injection patterns and withheld when flagged; URLs are unfiltered
-- Invalid `action` values return an error
-- Invalid or out-of-range `tab_index` returns a descriptive error
+- Invalid `action` values are rejected
+- An invalid or out-of-range `tab_index` is rejected with a descriptive message
 - Tab operations include race condition handling (tabs may close between listing and switching)
 
 ---
@@ -204,7 +206,7 @@ Execute JavaScript in the page context.
 - Runs in the context of the current page
 - Results pass through the ContentFilter (they may contain web content)
 - Objects and lists are JSON-encoded; every result is turned into a string and passed through the ContentFilter
-- Syntax errors are caught and returned as descriptive error messages
+- Syntax errors fail with a descriptive message
 
 **Examples:**
 ```javascript
@@ -230,7 +232,7 @@ Wait for a specific element or a fixed duration. At least one parameter must be 
 | `seconds` | `int` | `null` | Fixed seconds to wait (clamped to 0-120) |
 
 **Notes:**
-- If both parameters are `null`, returns an error
+- If both parameters are `null`, the call is rejected
 - `comet_search` returns before the answer is ready, so wait with `comet_wait` or a fixed delay, then call `comet_read_page`
 - If both are provided, waits for the selector (seconds is ignored)
 - Selector wait uses Playwright's `wait_for_selector` with the configured timeout

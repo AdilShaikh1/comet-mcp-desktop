@@ -52,6 +52,16 @@ def _read_source(filename: str) -> str:
     return _source_cache[filename]
 
 
+async def _tool_error_message(tool_call):
+    """Await a tool call that must fail. Return the ToolError message, or None when it did not raise one."""
+    from mcp.server.mcpserver.exceptions import ToolError
+    try:
+        await tool_call
+    except ToolError as error:
+        return str(error)
+    return None
+
+
 def record(name, passed, message="", duration=0):
     r = TestResult(name, passed, message, duration)
     results.append(r)
@@ -90,7 +100,7 @@ def test_imports():
 
 
 def test_mcp_server_object():
-    """Verify the FastMCP server object exists and has a run method."""
+    """Verify the MCPServer object exists and has a run method."""
     t0 = time.time()
     try:
         if "comet_mcp" in sys.modules:
@@ -247,6 +257,37 @@ def test_error_handling():
                    f"{try_count} try / {except_count} except blocks", time.time() - t0)
     except Exception as e:
         record("error_handling", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+def test_no_error_string_returns():
+    """Tools raise ToolError for failures; none may return an "Error..." string (clients would see a success)."""
+    t0 = time.time()
+    try:
+        import ast
+        from mcp.server.mcpserver.exceptions import ToolError
+        import comet_mcp
+        tree = ast.parse(_read_source("comet_mcp.py"))
+        offenders = []
+        for func in ast.walk(tree):
+            if not isinstance(func, ast.AsyncFunctionDef) or not func.name.startswith("comet_"):
+                continue
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Return) or node.value is None:
+                    continue
+                # Plain "Error..." and f"Error..." literals; the f-string's first part is a Constant.
+                first_text = node.value.values[0] if isinstance(node.value, ast.JoinedStr) and node.value.values else node.value
+                if (isinstance(first_text, ast.Constant) and isinstance(first_text.value, str)
+                        and first_text.value.startswith("Error")):
+                    offenders.append(f"{func.name}:{node.lineno}")
+        # _handle_error must hand back a ToolError, and keep a ToolError's own message unchanged.
+        assert isinstance(comet_mcp._handle_error(ValueError("boom")), ToolError)
+        assert str(comet_mcp._handle_error(ToolError("kept as written"))) == "kept as written"
+        if offenders:
+            record("no_error_string_returns", False, f"return \"Error...\" in {offenders}", time.time() - t0)
+        else:
+            record("no_error_string_returns", True, duration=time.time() - t0)
+    except Exception as e:
+        record("no_error_string_returns", False, f"{type(e).__name__}: {e}", time.time() - t0)
 
 
 def test_no_hardcoded_selectors():
@@ -526,7 +567,7 @@ def test_security_scan_tool_exists():
 
 
 def test_finance_validation():
-    """Bad finance arguments return an Error string before any browser call."""
+    """Bad finance arguments raise a ToolError before any browser call."""
     t0 = time.time()
     try:
         if "comet_mcp" in sys.modules:
@@ -551,13 +592,14 @@ def test_finance_validation():
         not_errors = []
         try:
             for label, kwargs in bad_calls.items():
-                result = asyncio.run(comet_mcp.comet_search_finance(**kwargs))
-                if not (isinstance(result, str) and result.startswith("Error:")):
-                    not_errors.append(f"{label}: {str(result)[:80]}")
+                message = asyncio.run(_tool_error_message(comet_mcp.comet_search_finance(**kwargs)))
+                # A RuntimeError from no_browser is wrapped by _handle_error as "RuntimeError: ...": not a validation error.
+                if message is None or message.startswith("RuntimeError"):
+                    not_errors.append(f"{label}: {message}")
         finally:
             comet_mcp._get_page = real_get_page
         if not_errors:
-            record("finance_validation", False, f"No Error: {not_errors}", time.time() - t0)
+            record("finance_validation", False, f"No ToolError: {not_errors}", time.time() - t0)
         else:
             record("finance_validation", True, f"{len(bad_calls)} bad inputs rejected", time.time() - t0)
     except Exception as e:
@@ -759,9 +801,6 @@ async def test_tool_comet_search_finance():
         checks = (("market", None, None), ("quote", "NVDA", "NVIDIA"))
         for mode, ticker, expected_text in checks:
             result = str(await comet_search_finance(mode=mode, ticker=ticker))
-            if result.startswith("Error"):
-                record("tool_comet_search_finance", False, f"{mode}: {result[:200]}", time.time() - t0)
-                return
             await asyncio.sleep(5)  # the hint says ~3-5s for dynamic data
             page_text = str(await comet_read_page(selector="main"))
             # Check the body only: the header above "---" carries the page title, which names the ticker.
@@ -813,18 +852,17 @@ async def test_tool_comet_click():
 
 
 async def test_tool_comet_click_nonexistent():
-    """Click on a selector that doesn't exist — should return error."""
+    """Click on a selector that doesn't exist — should raise a ToolError."""
     t0 = time.time()
     try:
         from comet_mcp import comet_navigate, comet_click
         await comet_navigate(url="https://example.com")
-        result = await comet_click(selector="#does-not-exist-xyz", wait_after=1)
-        result_str = str(result)
-        if "error" in result_str.lower() or "timeout" in result_str.lower():
-            record("tool_comet_click_nonexistent", True, "Error returned as expected", time.time() - t0)
+        message = await _tool_error_message(comet_click(selector="#does-not-exist-xyz", wait_after=1))
+        if message is not None and "timeout" in message.lower():
+            record("tool_comet_click_nonexistent", True, "ToolError raised as expected", time.time() - t0)
         else:
             record("tool_comet_click_nonexistent", False,
-                   f"Expected error, got: {result_str[:200]}", time.time() - t0)
+                   f"Expected ToolError, got: {message}", time.time() - t0)
     except Exception as e:
         record("tool_comet_click_nonexistent", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
@@ -881,18 +919,17 @@ async def test_tool_comet_evaluate():
 
 
 async def test_tool_comet_evaluate_syntax_error():
-    """JS syntax error should return error, not crash."""
+    """JS syntax error should raise a ToolError, not crash."""
     t0 = time.time()
     try:
         from comet_mcp import comet_evaluate
-        result = await comet_evaluate("const x = }")
-        result_str = str(result)
-        if "error" in result_str.lower():
+        message = await _tool_error_message(comet_evaluate("const x = }"))
+        if message is not None:
             record("tool_comet_evaluate_syntax_error", True,
                    "Syntax error handled gracefully", time.time() - t0)
         else:
             record("tool_comet_evaluate_syntax_error", False,
-                   f"Expected error, got: {result_str[:200]}", time.time() - t0)
+                   "Expected ToolError, none raised", time.time() - t0)
     except Exception as e:
         record("tool_comet_evaluate_syntax_error", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
@@ -936,36 +973,34 @@ async def test_tool_comet_wait_seconds():
 
 
 async def test_tool_comet_wait_no_params():
-    """Wait with no selector or seconds should return error."""
+    """Wait with no selector or seconds should raise a ToolError."""
     t0 = time.time()
     try:
         from comet_mcp import comet_wait
-        result = await comet_wait()
-        result_str = str(result)
-        if "error" in result_str.lower() or "provide" in result_str.lower():
+        message = await _tool_error_message(comet_wait())
+        if message is not None and "provide" in message.lower():
             record("tool_comet_wait_no_params", True,
-                   "Error returned as expected", time.time() - t0)
+                   "ToolError raised as expected", time.time() - t0)
         else:
             record("tool_comet_wait_no_params", False,
-                   f"Expected error, got: {result_str[:200]}", time.time() - t0)
+                   f"Expected ToolError, got: {message}", time.time() - t0)
     except Exception as e:
         record("tool_comet_wait_no_params", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
 
 
 async def test_tool_comet_tabs_invalid_index():
-    """Switch to an invalid tab index should return error."""
+    """Switch to an invalid tab index should raise a ToolError."""
     t0 = time.time()
     try:
         from comet_mcp import comet_tabs
-        result = await comet_tabs(action="switch", tab_index=999)
-        result_str = str(result)
-        if "error" in result_str.lower() or "invalid" in result_str.lower():
+        message = await _tool_error_message(comet_tabs(action="switch", tab_index=999))
+        if message is not None and "invalid" in message.lower():
             record("tool_comet_tabs_invalid_index", True,
-                   "Error on invalid index", time.time() - t0)
+                   "ToolError on invalid index", time.time() - t0)
         else:
             record("tool_comet_tabs_invalid_index", False,
-                   f"Expected error, got: {result_str[:200]}", time.time() - t0)
+                   f"Expected ToolError, got: {message}", time.time() - t0)
     except Exception as e:
         record("tool_comet_tabs_invalid_index", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
@@ -1187,6 +1222,7 @@ def run_static_tests(test_filter=None):
         ("connect_failure_start_command", test_connect_failure_gives_start_command),
         ("no_process_kill", test_no_process_kill),
         ("error_handling", test_error_handling),
+        ("no_error_string_returns", test_no_error_string_returns),
         ("no_hardcoded_selectors", test_no_hardcoded_selectors),
         ("url_based_search", test_url_based_search),
         ("windows_compat", test_windows_compatibility),
