@@ -6,7 +6,7 @@ Complete API documentation for all 12 Comet MCP tools.
 
 ## `comet_connect`
 
-Connect to Comet via CDP. Auto-launches Comet if needed. **Call this before using any other tool.**
+Connect to a running Comet via CDP. The server never starts Comet, so start it with `--remote-debugging-port` first. When the connection fails, the error returns the command that starts Comet. **Call this before using any other tool.**
 
 ```
 Parameters: none

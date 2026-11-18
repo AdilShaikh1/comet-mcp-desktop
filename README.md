@@ -16,7 +16,7 @@ The results of `comet_search`, `comet_search_finance`, `comet_navigate`, `comet_
 
 | Tool | What it does |
 | --- | --- |
-| `comet_connect` | Connects to Comet over CDP and starts Comet if it isn't running. Call it first. |
+| `comet_connect` | Connects to a running Comet over CDP. Call it first. |
 | `comet_search` | Starts a Perplexity search in a new tab, in `search` or `research` mode. |
 | `comet_search_finance` | Opens a Perplexity Finance page in the active tab (market, quote, screener, earnings or predictions). |
 | `comet_navigate` | Opens a URL in the active tab and returns a text preview. |
@@ -41,7 +41,7 @@ The browsing tools work on any site. Use `comet_security_scan` on a page that lo
 
 **Requirements.** The server needs Perplexity's [Comet](https://perplexity.ai/comet) browser on Windows or macOS, Python 3.10 or newer, and [uv](https://docs.astral.sh/uv/).
 
-**Start Comet with remote debugging.** The server reaches Comet on the CDP port, so Comet must run with `--remote-debugging-port=9222`. When Comet isn't running at all and the CDP URL points at this machine, the server starts it with the flag on the first tool call. When Comet is already open without the flag, quit it fully and start it with one of these commands. The server never closes or kills Comet.
+**Start Comet with remote debugging.** The server reaches Comet on the CDP port, so Comet must run with `--remote-debugging-port=9222`. Start Comet with one of these commands before you use the server. When Comet is already open without the flag, quit it fully first. The server never starts or closes Comet.
 
 On Windows (PowerShell):
 
@@ -85,7 +85,7 @@ uv sync
 uv run comet-mcp-desktop
 ```
 
-The server then waits for an MCP client on stdio. [docs/configuration.md](docs/configuration.md) shows a client config that points at a clone, and it lists the environment variables (`COMET_CDP_URL`, `COMET_TIMEOUT`, `COMET_MAX_CONTENT` and `COMET_PATH`).
+The server then waits for an MCP client on stdio. [docs/configuration.md](docs/configuration.md) shows a client config that points at a clone, and it lists the environment variables (`COMET_CDP_URL`, `COMET_TIMEOUT` and `COMET_MAX_CONTENT`).
 
 ## Usage
 
@@ -108,7 +108,7 @@ Ask Claude for something on the web. Claude calls `comet_connect` once, then the
 
 **Does it need a paid Perplexity plan?** Not for searches and Finance pages, which were tested on a free account. The screener mode was not tested on one.
 
-**What happens if Comet is already open without the flag?** The server doesn't start a second copy. `comet_connect` returns an error that says Comet is running but the CDP URL didn't accept a connection. Quit Comet fully, start it with `--remote-debugging-port=9222` and call `comet_connect` again. On a managed machine, the `RemoteDebuggingAllowed` policy can block remote debugging.
+**What happens if Comet is already open without the flag?** `comet_connect` returns an error that says the CDP URL didn't accept a connection and gives the command that starts Comet with the flag. Quit Comet fully, run that command and call `comet_connect` again. On a managed machine, the `RemoteDebuggingAllowed` policy can block remote debugging.
 
 **The connection dropped mid-session. What now?** Call `comet_connect` again. It reconnects without restarting the server. The search tabs stay open in Comet, but the server stops tracking them.
 

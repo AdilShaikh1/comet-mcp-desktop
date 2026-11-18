@@ -12,7 +12,6 @@ import json
 import sys
 import os
 import time
-import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -163,7 +162,7 @@ def test_tools_are_async():
 def test_helper_functions():
     """Verify helper functions exist."""
     t0 = time.time()
-    helpers = ["_ensure_browser", "_get_page", "_find_comet_path", "_comet_running", "_safe_title"]
+    helpers = ["_ensure_browser", "_get_page", "_safe_title"]
     try:
         if "comet_mcp" in sys.modules:
             del sys.modules["comet_mcp"]
@@ -188,38 +187,48 @@ def test_cdp_port_parsing():
         record("cdp_port_parsing", False, f"{type(e).__name__}: {e}", time.time() - t0)
 
 
-def test_comet_path_override_first():
-    """COMET_PATH wins over every probed install path, even when a probed install exists."""
+def test_connect_failure_gives_start_command():
+    """A closed CDP port returns a ConnectionError with the start command and starts nothing."""
     t0 = time.time()
-    saved = {name: os.environ.get(name) for name in ("COMET_PATH", "LOCALAPPDATA")}
+    closed_port = 9  # the discard port: nothing listens on it
+    saved_url = os.environ.get("COMET_CDP_URL")
     try:
-        import comet_mcp as mod
-        with tempfile.TemporaryDirectory() as fake_local_app_data:
-            # A fake install at the first probed path, so the check fails if COMET_PATH is not checked first.
-            probed_install = os.path.join(fake_local_app_data, "Perplexity", "Comet", "Application", "comet.exe")
-            override = os.path.join(fake_local_app_data, "override-comet.exe")
-            os.makedirs(os.path.dirname(probed_install))
-            for fake_executable in (probed_install, override):
-                Path(fake_executable).touch()
-            os.environ["LOCALAPPDATA"] = fake_local_app_data
-            os.environ["COMET_PATH"] = override
-            found = mod._find_comet_path()
-        record("comet_path_override_first", found == override, f"got {found}", time.time() - t0)
+        import importlib.util
+        os.environ["COMET_CDP_URL"] = f"http://localhost:{closed_port}"
+        # Fresh import under its own name, so CDP_URL and START_COMMAND pick up the closed port.
+        spec = importlib.util.spec_from_file_location("comet_mcp_closed_port", "comet_mcp.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        async def connect_then_stop_driver():
+            try:
+                await mod._ensure_browser()
+            finally:
+                # The failed connect leaves Playwright's driver running; stop it so the loop closes cleanly.
+                if mod._playwright:
+                    await mod._playwright.stop()
+
+        try:
+            asyncio.run(connect_then_stop_driver())
+            record("connect_failure_start_command", False, "no error raised", time.time() - t0)
+            return
+        except ConnectionError as error:
+            message = str(error)
+        passed = f"--remote-debugging-port={closed_port}" in message and "Start Comet" in message
+        record("connect_failure_start_command", passed, "" if passed else f"got {message}", time.time() - t0)
     except Exception as e:
-        record("comet_path_override_first", False, f"{type(e).__name__}: {e}", time.time() - t0)
+        record("connect_failure_start_command", False, f"{type(e).__name__}: {e}", time.time() - t0)
     finally:
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
+        if saved_url is None:
+            os.environ.pop("COMET_CDP_URL", None)
+        else:
+            os.environ["COMET_CDP_URL"] = saved_url
 
 
 def test_no_process_kill():
-    """The server must never kill the user's browser."""
+    """The server starts no processes, so it can neither launch nor kill the user's browser."""
     t0 = time.time()
     source = _read_source("comet_mcp.py")
-    found = [word for word in ("taskkill", "pkill", "_kill_comet") if word in source]
+    found = [word for word in ("taskkill", "pkill", "subprocess", "Popen") if word in source]
     record("no_process_kill", not found, f"found: {found}" if found else "", time.time() - t0)
 
 
@@ -285,7 +294,6 @@ def test_windows_compatibility():
         checks = {
             "LOCALAPPDATA": "LOCALAPPDATA" in source,
             "comet.exe": "comet.exe" in source.lower(),
-            "subprocess": "subprocess" in source,
         }
         failed = [k for k, v in checks.items() if not v]
         if failed:
@@ -1176,7 +1184,7 @@ def run_static_tests(test_filter=None):
         ("tools_are_async", test_tools_are_async),
         ("helper_functions", test_helper_functions),
         ("cdp_port_parsing", test_cdp_port_parsing),
-        ("comet_path_override_first", test_comet_path_override_first),
+        ("connect_failure_start_command", test_connect_failure_gives_start_command),
         ("no_process_kill", test_no_process_kill),
         ("error_handling", test_error_handling),
         ("no_hardcoded_selectors", test_no_hardcoded_selectors),
