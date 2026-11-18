@@ -271,3 +271,26 @@ HTML Comments: 0 suspicious
 Overall: CLEAN
 ════════════════════════════════════════
 ```
+
+---
+
+## Tool Annotations
+
+Every tool sends MCP annotations, which clients use to decide what to auto-approve and what to confirm. `idempotent` means a repeat call with the same arguments leaves the same state. `open world` means the tool reaches the web and not only the browser.
+
+| Tool | Read-only | Destructive | Idempotent | Open world |
+|---|---|---|---|---|
+| `comet_connect` | yes | no | yes | no |
+| `comet_read_page` | yes | no | yes | yes |
+| `comet_screenshot` | yes | no | yes | yes |
+| `comet_security_scan` | yes | no | yes | yes |
+| `comet_wait` | yes | no | yes | yes |
+| `comet_navigate` | no | no | yes | yes |
+| `comet_search` | no | no | no | yes |
+| `comet_search_finance` | no | no | no | yes |
+| `comet_click` | no | yes | no | yes |
+| `comet_type` | no | yes | no | yes |
+| `comet_evaluate` | no | yes | no | yes |
+| `comet_tabs` | no | yes | no | yes |
+
+Click, type and evaluate can submit forms or run arbitrary script, and `comet_tabs` can close a tab and open any URL with its `new` action, so those four are marked destructive and open world. `comet_search` is not destructive: it only closes the oldest of its own search tabs when it reaches the 5-tab cap, and never a tab you opened.

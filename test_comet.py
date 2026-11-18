@@ -169,6 +169,37 @@ def test_tools_are_async():
         record("tools_are_async", False, f"{type(e).__name__}: {e}", time.time() - t0)
 
 
+def test_tool_annotations():
+    """Every tool is registered with annotations, and the destructive set is exactly the four expected tools."""
+    t0 = time.time()
+    expected_destructive = {"comet_click", "comet_type", "comet_evaluate", "comet_tabs"}
+    try:
+        import ast
+        tree = ast.parse((Path(__file__).parent / "comet_mcp.py").read_text(encoding="utf-8"))
+        # Map each tool function to the constant named in @mcp.tool(annotations=...), or None when absent.
+        annotation_names = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "mcp.tool":
+                    keywords = {kw.arg: kw.value for kw in decorator.keywords}
+                    annotation_names[node.name] = keywords.get("annotations")
+        unannotated = sorted(name for name, value in annotation_names.items() if value is None)
+        assert len(annotation_names) == 12, f"expected 12 tools, found {len(annotation_names)}"
+        assert not unannotated, f"Missing annotations: {unannotated}"
+        # Resolve each constant to its ToolAnnotations value by importing the module.
+        if "comet_mcp" in sys.modules:
+            del sys.modules["comet_mcp"]
+        import comet_mcp as mod
+        destructive = {name for name, value in annotation_names.items()
+                       if getattr(mod, value.id).destructive_hint}
+        assert destructive == expected_destructive, f"destructive set is {sorted(destructive)}"
+        record("tool_annotations", True, duration=time.time() - t0)
+    except Exception as e:
+        record("tool_annotations", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
 def test_helper_functions():
     """Verify helper functions exist."""
     t0 = time.time()
@@ -1228,6 +1259,7 @@ def run_static_tests(test_filter=None):
         ("mcp_server_object", test_mcp_server_object),
         ("tool_registration", test_tool_registration),
         ("tools_are_async", test_tools_are_async),
+        ("tool_annotations", test_tool_annotations),
         ("helper_functions", test_helper_functions),
         ("cdp_port_parsing", test_cdp_port_parsing),
         ("connect_no_defaults", test_connect_uses_no_defaults),

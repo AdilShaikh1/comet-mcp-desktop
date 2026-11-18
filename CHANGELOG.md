@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Every tool now tells MCP clients whether it only reads, can change or destroy page state, and reaches the web. (#12)
 - The server needs Playwright 1.65 and attaches to Comet without changing its downloads, fonts, focus or media settings. (#11)
 - The server runs on mcp 2.x, and tool errors reach the client as MCP tool errors instead of plain text. (#10)
 - The server no longer starts Comet, because a Comet it started could close with the server. Start Comet with `--remote-debugging-port` first, and `COMET_PATH` is gone. (#9)
