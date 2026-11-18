@@ -23,7 +23,8 @@ from urllib.parse import quote, urlparse
 
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from playwright.async_api import async_playwright, Browser, Page
 
 from content_filter import ContentFilter
@@ -81,7 +82,7 @@ MAX_SEARCH_TABS = 5
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
-mcp = FastMCP("comet_mcp")
+mcp = MCPServer("comet_mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +143,19 @@ def _valid_tab_index(tab_index: Optional[int], pages: list) -> bool:
     return tab_index is not None and 0 <= tab_index < len(pages)
 
 
-def _handle_error(e: Exception, context: str = "") -> str:
-    """Format tool errors consistently."""
+def _handle_error(e: Exception, context: str = "") -> ToolError:
+    """Turn a caught exception into a ToolError; call sites `raise _handle_error(e) from e`.
+
+    MCP 2.x drops the message of a plain exception, so every failure must leave a tool as a ToolError.
+    """
+    if isinstance(e, ToolError):
+        return e  # raised by our own validation inside the try block: keep its message as written
     error_type = type(e).__name__
     if "closed" in str(e).lower():
-        return "Error: Browser connection lost. Use comet_connect to reconnect."
+        return ToolError("Browser connection lost. Use comet_connect to reconnect.")
     if "Timeout" in str(e):
-        return f"Error: {context} timed out. {e}" if context else f"Error: Timed out. {e}"
-    return f"Error ({error_type}): {e}"
+        return ToolError(f"{context} timed out. {e}" if context else f"Timed out. {e}")
+    return ToolError(f"{error_type}: {e}")
 
 
 def _sanitize_and_return(text: str, url: str) -> str:
@@ -273,11 +279,11 @@ async def comet_connect() -> str:
             f"Use comet_security_scan on any page that seems suspicious.\n"
             f"**Tabs**: Each search gets its own tab (tagged [search] in comet_tabs list). "
             f"Use comet_tabs to list/switch/close. Oldest search tab auto-closes at cap.\n"
-            f"**Errors**: 'connection lost' → call comet_connect again. "
+            f"**Errors**: a failed tool call is an MCP tool error (is_error) with the message. 'connection lost' → call comet_connect again. "
             f"'timed out' → call comet_connect to reconnect."
         )
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -304,9 +310,9 @@ async def comet_search(
     """
     try:
         if mode not in VALID_SEARCH_MODES:
-            return f"Error: mode must be one of {VALID_SEARCH_MODES}, got '{mode}'"
+            raise ToolError(f"mode must be one of {VALID_SEARCH_MODES}, got '{mode}'")
         if not query or not query.strip():
-            return "Error: query must not be empty."
+            raise ToolError("query must not be empty.")
         global _page
         browser = await _ensure_browser()
         contexts = browser.contexts
@@ -369,7 +375,7 @@ async def comet_search(
             url,
         )
     except Exception as e:
-        return _handle_error(e, "Search")
+        raise _handle_error(e, "Search") from e
 
 
 @mcp.tool()
@@ -400,24 +406,24 @@ async def comet_search_finance(
     """
     try:
         if mode not in VALID_FINANCE_MODES:
-            return f"Error: mode must be one of {VALID_FINANCE_MODES}, got '{mode}'"
+            raise ToolError(f"mode must be one of {VALID_FINANCE_MODES}, got '{mode}'")
 
         if mode == "quote":
             if not ticker or not ticker.strip():
-                return "Error: ticker is required for 'quote' mode (e.g., ticker='NVDA')."
+                raise ToolError("ticker is required for 'quote' mode (e.g., ticker='NVDA').")
             ticker = ticker.strip().upper()
             # Letters, digits, dots, hyphens and carets (^VIX), with at least one letter or digit:
             # a ticker of only dots would resolve /finance/.. to the Perplexity home page.
             if (not re.fullmatch(r"[A-Z0-9.\-^]+", ticker) or not any(ch.isalnum() for ch in ticker)
                     or len(ticker) > MAX_TICKER_CHARS):
-                return f"Error: invalid ticker '{ticker}'. Use a symbol such as 'NVDA', 'BTCUSD' or '^VIX'."
+                raise ToolError(f"invalid ticker '{ticker}'. Use a symbol such as 'NVDA', 'BTCUSD' or '^VIX'.")
 
         if mode == "screener":
             if not query or not query.strip():
-                return "Error: query is required for 'screener' mode."
+                raise ToolError("query is required for 'screener' mode.")
             # The query is typed key by key (30 ms each), so a long one would block the tool for minutes.
             if len(query.strip()) > MAX_SCREENER_QUERY_CHARS:
-                return f"Error: screener query is longer than {MAX_SCREENER_QUERY_CHARS} characters."
+                raise ToolError(f"screener query is longer than {MAX_SCREENER_QUERY_CHARS} characters.")
 
         page = await _get_page()
 
@@ -508,7 +514,7 @@ async def comet_search_finance(
             final_url,
         )
     except Exception as e:
-        return _handle_error(e, f"Finance ({mode})")
+        raise _handle_error(e, f"Finance ({mode})") from e
 
 
 @mcp.tool()
@@ -527,7 +533,7 @@ async def comet_navigate(
     """
     try:
         if wait_for not in VALID_WAIT_FOR:
-            return f"Error: wait_for must be one of {VALID_WAIT_FOR}, got '{wait_for}'"
+            raise ToolError(f"wait_for must be one of {VALID_WAIT_FOR}, got '{wait_for}'")
         page = await _get_page()
         await page.goto(url, wait_until=wait_for, timeout=DEFAULT_TIMEOUT)
         title = await page.title()
@@ -536,7 +542,7 @@ async def comet_navigate(
         combined = f"**Navigated to**: {final_url}\n**Title**: {title}\n\n**Preview** (first ~3000 chars):\n{preview}"
         return _sanitize_and_return(combined, final_url)
     except Exception as e:
-        return _handle_error(e, f"Navigation to {url}")
+        raise _handle_error(e, f"Navigation to {url}") from e
 
 
 @mcp.tool()
@@ -574,7 +580,7 @@ async def comet_read_page(
         combined = f"**Page**: {title}\n**URL**: {url}\n**Selector**: {selector or '(full page)'}\n\n---\n\n{text}"
         return _sanitize_and_return(combined, url)
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -607,7 +613,7 @@ async def comet_screenshot(full_page: bool = False) -> str:
             f"![screenshot](data:image/png;base64,{b64})"
         )
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -615,7 +621,7 @@ async def comet_click(selector: str, wait_after: int = 2) -> str:
     """Click an element on the current Comet page.
 
     Use 'text=...' for visible text matching (preferred over brittle CSS selectors).
-    Waits after click for page to settle. If element not found, returns error —
+    Waits after click for page to settle. If the element is not found, the tool raises an error —
     use comet_read_page first to verify the element exists.
 
     Args:
@@ -636,7 +642,7 @@ async def comet_click(selector: str, wait_after: int = 2) -> str:
             f"**URL**: {url}"
         )
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -670,7 +676,7 @@ async def comet_type(
             f"**Enter pressed**: {press_enter}"
         )
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -694,11 +700,11 @@ async def comet_tabs(
     global _page
     try:
         if action not in VALID_TAB_ACTIONS:
-            return f"Error: action must be one of {VALID_TAB_ACTIONS}, got '{action}'"
+            raise ToolError(f"action must be one of {VALID_TAB_ACTIONS}, got '{action}'")
         browser = await _ensure_browser()
         contexts = browser.contexts
         if not contexts:
-            return "Error: No browser contexts found."
+            raise ToolError("No browser contexts found.")
         pages = contexts[0].pages
 
         if action == "list":
@@ -723,19 +729,19 @@ async def comet_tabs(
 
         elif action == "switch":
             if not _valid_tab_index(tab_index, pages):
-                return f"Error: Invalid tab index. Available: 0-{len(pages)-1}"
+                raise ToolError(f"Invalid tab index. Available: 0-{len(pages)-1}")
             try:
                 _page = pages[tab_index]
                 title = await _page.title()
                 return f"**Switched to tab [{tab_index}]**: {_safe_title(title)} - {_page.url}"
             except Exception as tab_err:
-                return f"Error: Tab {tab_index} is no longer available: {tab_err}"
+                raise ToolError(f"Tab {tab_index} is no longer available: {tab_err}")
 
         elif action == "close":
             if not _valid_tab_index(tab_index, pages):
-                return f"Error: Invalid tab index. Available: 0-{len(pages)-1}"
+                raise ToolError(f"Invalid tab index. Available: 0-{len(pages)-1}")
             if len(pages) <= 1:
-                return "Error: Cannot close the last tab."
+                raise ToolError("Cannot close the last tab.")
             try:
                 target = pages[tab_index]
                 title = await target.title()
@@ -747,11 +753,11 @@ async def comet_tabs(
                     _page = remaining[-1] if remaining else None
                 return f"**Closed tab [{tab_index}]**: {_safe_title(title)}"
             except Exception as tab_err:
-                return f"Error: Tab {tab_index} is no longer available: {tab_err}"
+                raise ToolError(f"Tab {tab_index} is no longer available: {tab_err}")
 
-        return f"Error: Unknown action '{action}'. Use: list, new, switch, close"
+        raise ToolError(f"Unknown action '{action}'. Use: list, new, switch, close")
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -774,7 +780,7 @@ async def comet_evaluate(expression: str) -> str:
             result_str = str(result)
         return _sanitize_and_return(result_str, page.url)
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 @mcp.tool()
@@ -802,9 +808,9 @@ async def comet_wait(
             await asyncio.sleep(seconds)
             return f"**Waited**: {seconds} seconds"
         else:
-            return "Error: Provide either 'selector' or 'seconds'."
+            raise ToolError("Provide either 'selector' or 'seconds'.")
     except Exception as e:
-        return _handle_error(e, f"Waiting for '{selector}'" if selector else "")
+        raise _handle_error(e, f"Waiting for '{selector}'" if selector else "") from e
 
 
 # ---------------------------------------------------------------------------
@@ -917,7 +923,7 @@ async def comet_security_scan() -> str:
 
         return "\n".join(report)
     except Exception as e:
-        return _handle_error(e)
+        raise _handle_error(e) from e
 
 
 # ---------------------------------------------------------------------------

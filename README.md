@@ -108,7 +108,7 @@ Ask Claude for something on the web. Claude calls `comet_connect` once, then the
 
 **Does it need a paid Perplexity plan?** Not for searches and Finance pages, which were tested on a free account. The screener mode was not tested on one.
 
-**What happens if Comet is already open without the flag?** `comet_connect` returns an error that says the CDP URL didn't accept a connection and gives the command that starts Comet with the flag. Quit Comet fully, run that command and call `comet_connect` again. On a managed machine, the `RemoteDebuggingAllowed` policy can block remote debugging.
+**What happens if Comet is already open without the flag?** `comet_connect` fails with a tool error that says the CDP URL didn't accept a connection and gives the command that starts Comet with the flag. Quit Comet fully, run that command and call `comet_connect` again. On a managed machine, the `RemoteDebuggingAllowed` policy can block remote debugging.
 
 **The connection dropped mid-session. What now?** Call `comet_connect` again. It reconnects without restarting the server. The search tabs stay open in Comet, but the server stops tracking them.
 
@@ -124,9 +124,9 @@ Ask Claude for something on the web. Claude calls `comet_connect` once, then the
 
 ## Tests
 
-`uv run python test_comet.py` runs 25 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
+`uv run python test_comet.py` runs 26 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
 
-`uv run python test_comet.py --with-browser` adds the live tier, for 52 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
+`uv run python test_comet.py --with-browser` adds the live tier, for 53 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
 
 `--test NAME` runs one test, for example `uv run python test_comet.py --test finance_validation`. Results land in `test_results/`, which git ignores.
 

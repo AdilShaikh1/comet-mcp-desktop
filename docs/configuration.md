@@ -97,12 +97,12 @@ The server validates all tool parameters to prevent misuse:
 
 | Validation | Affected tools | Behavior |
 |------------|---------------|----------|
-| Enum rejection | `comet_search` (mode), `comet_navigate` (wait_for), `comet_tabs` (action) | Returns error for invalid values |
+| Enum rejection | `comet_search` (mode), `comet_navigate` (wait_for), `comet_tabs` (action) | Rejects invalid values |
 | Numeric clamping | `comet_click` (wait_after), `comet_wait` (seconds) | Clamped to `[0, 120]` |
 | Max length cap | `comet_read_page` (max_length) | Capped at `COMET_MAX_CONTENT` |
-| Empty rejection | `comet_search` (query) | Returns error for empty/whitespace queries |
-| Finance inputs | `comet_search_finance` (mode, ticker, query) | Returns error for an unknown mode, a missing or malformed ticker (letters, digits, `.`, `-`, `^`, at most 20), or a missing screener query or one over 500 characters |
-| Index bounds | `comet_tabs` (tab_index) | Returns error for negative or out-of-range indices |
+| Empty rejection | `comet_search` (query) | Rejects empty or whitespace queries |
+| Finance inputs | `comet_search_finance` (mode, ticker, query) | Rejects an unknown mode, a missing or malformed ticker (letters, digits, `.`, `-`, `^`, at most 20), or a missing screener query or one over 500 characters |
+| Index bounds | `comet_tabs` (tab_index) | Rejects negative or out-of-range indices |
 
 ## Comet Browser Setup
 

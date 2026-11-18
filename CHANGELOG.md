@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The server runs on mcp 2.x, and tool errors reach the client as MCP tool errors instead of plain text. (#10)
 - The server no longer starts Comet, because a Comet it started could close with the server. Start Comet with `--remote-debugging-port` first, and `COMET_PATH` is gone. (#9)
 - `comet_connect`, `comet_screenshot`, `comet_click` and `comet_tabs` check page titles against the filter's injection patterns and withhold a flagged title. URLs are shown as they are. (#8)
 

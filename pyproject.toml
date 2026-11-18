@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Browsers",
 ]
 dependencies = [
-    "mcp[cli]>=1.26.0,<2",  # 2.x removed mcp.server.fastmcp; migrate before lifting this
+    "mcp[cli]>=2.3,<3",
     "playwright>=1.58.0",
     "pydantic>=2.12.5",
 ]
@@ -40,3 +40,7 @@ only-include = ["comet_mcp.py", "content_filter.py"]
 
 [tool.hatch.build.targets.sdist]
 only-include = ["comet_mcp.py", "content_filter.py", "pyproject.toml", "README.md", "LICENSE"]
+
+[tool.uv]
+# Supply-chain cooldown: never lock a release younger than a week.
+exclude-newer = "7 days"
