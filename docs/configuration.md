@@ -55,10 +55,9 @@ All environment variables are optional. The server works with defaults out of th
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COMET_CDP_URL` | `http://localhost:9222` | CDP endpoint URL. Change if Comet runs on a different port; auto-launch uses this URL's port (9222 if the URL has none). |
+| `COMET_CDP_URL` | `http://localhost:9222` | CDP endpoint URL. Change if Comet runs on a different port. |
 | `COMET_TIMEOUT` | `30000` | Operation timeout in milliseconds. Increase for slow connections. |
 | `COMET_MAX_CONTENT` | `50000` | Maximum characters extracted from pages. Prevents oversized responses. |
-| `COMET_PATH` | auto-detected | Full path to the Comet executable. Checked first, before the auto-detected paths. |
 
 ### Setting environment variables
 
@@ -80,21 +79,17 @@ All environment variables are optional. The server works with defaults out of th
 
 **System-wide (Windows PowerShell):**
 ```powershell
-$env:COMET_PATH = "C:\Custom\Path\comet.exe"
+$env:COMET_TIMEOUT = "60000"
 ```
 
 **System-wide (macOS):**
 ```bash
-export COMET_PATH="/custom/path/comet"
+export COMET_TIMEOUT="60000"
 ```
 
 ## Platform Support
 
-| Platform | Auto-detect path | Notes |
-|----------|-----------------|-------|
-| **Windows** | `%LOCALAPPDATA%\Perplexity\Comet\Application\comet.exe`, `%LOCALAPPDATA%\Perplexity\Comet\comet.exe` (reported, unverified), `%PROGRAMFILES%\Perplexity\Comet\Application\comet.exe` | Fully supported. Probed in this order after `COMET_PATH`. |
-| **macOS** | `/Applications/Comet.app/Contents/MacOS/Comet`, `/Applications/Perplexity Comet.app/Contents/MacOS/comet` (reported, unverified) | Supported. Probed in this order after `COMET_PATH`. |
-| **Linux** | None | Comet has no Linux build. |
+Comet runs on Windows and macOS. It has no Linux build.
 
 ## Parameter Validation
 
@@ -111,7 +106,7 @@ The server validates all tool parameters to prevent misuse:
 
 ## Comet Browser Setup
 
-The MCP server launches Comet with `--remote-debugging-port=<port>` (the port of `COMET_CDP_URL`, default 9222) only when Comet is not running and `COMET_CDP_URL` points at this machine. It never closes or kills Comet. If Comet is already running without debugging, quit it fully and restart it with the flag. If auto-launch fails, start Comet manually:
+The MCP server never starts or closes Comet. Start Comet yourself with `--remote-debugging-port=<port>`. Use the port of `COMET_CDP_URL` (default 9222). If Comet is already running without the flag, quit it fully first.
 
 **Windows (PowerShell):**
 ```powershell
