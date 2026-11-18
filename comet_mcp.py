@@ -25,6 +25,7 @@ import sys
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from playwright.async_api import async_playwright, Browser, Page
 
 from content_filter import ContentFilter
@@ -249,9 +250,22 @@ async def _extract_text(
 
 
 # ---------------------------------------------------------------------------
+# Tool annotations: hints MCP clients use to decide what to auto-approve.
+# ---------------------------------------------------------------------------
+# Observes only. open_world is False for comet_connect, which touches the browser and not the web.
+_READ_LOCAL = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+_READ_WEB = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+# Changes what the tab shows but destroys nothing.
+_NAVIGATE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+_SEARCH = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+# Can submit forms, run arbitrary script, or (comet_tabs) close a tab or open any URL.
+_ACT = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True)
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
-@mcp.tool()
+@mcp.tool(annotations=_READ_LOCAL)
 async def comet_connect() -> str:
     """Connect to the Comet browser via CDP. Comet must already be running with remote debugging.
 
@@ -287,7 +301,7 @@ async def comet_connect() -> str:
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SEARCH)
 async def comet_search(
     query: str,
     mode: str = "search",
@@ -379,7 +393,7 @@ async def comet_search(
         raise _handle_error(e, "Search") from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SEARCH)
 async def comet_search_finance(
     mode: str = "market",
     ticker: Optional[str] = None,
@@ -518,7 +532,7 @@ async def comet_search_finance(
         raise _handle_error(e, f"Finance ({mode})") from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_NAVIGATE)
 async def comet_navigate(
     url: str,
     wait_for: str = "domcontentloaded",
@@ -546,7 +560,7 @@ async def comet_navigate(
         raise _handle_error(e, f"Navigation to {url}") from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_WEB)
 async def comet_read_page(
     selector: Optional[str] = None,
     include_links: bool = True,
@@ -584,7 +598,7 @@ async def comet_read_page(
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_WEB)
 async def comet_screenshot(full_page: bool = False) -> str:
     """Take a screenshot of the current Comet page. Returns base64 PNG.
 
@@ -617,7 +631,7 @@ async def comet_screenshot(full_page: bool = False) -> str:
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACT)
 async def comet_click(selector: str, wait_after: int = 2) -> str:
     """Click an element on the current Comet page.
 
@@ -646,7 +660,7 @@ async def comet_click(selector: str, wait_after: int = 2) -> str:
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACT)
 async def comet_type(
     selector: str,
     text: str,
@@ -680,7 +694,7 @@ async def comet_type(
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACT)
 async def comet_tabs(
     action: str = "list",
     tab_index: Optional[int] = None,
@@ -761,7 +775,7 @@ async def comet_tabs(
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACT)
 async def comet_evaluate(expression: str) -> str:
     """Evaluate a JavaScript expression in the current Comet page.
 
@@ -784,7 +798,7 @@ async def comet_evaluate(expression: str) -> str:
         raise _handle_error(e) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_WEB)
 async def comet_wait(
     selector: Optional[str] = None,
     seconds: Optional[int] = None,
@@ -817,7 +831,7 @@ async def comet_wait(
 # ---------------------------------------------------------------------------
 # Deep Security Scan Tool
 # ---------------------------------------------------------------------------
-@mcp.tool()
+@mcp.tool(annotations=_READ_WEB)
 async def comet_security_scan() -> str:
     """Deep security scan of current page for prompt injection and hidden content.
 

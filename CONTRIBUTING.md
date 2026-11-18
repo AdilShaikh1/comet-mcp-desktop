@@ -23,10 +23,10 @@ uv sync
 The suite has a static tier that needs no browser and a live tier that runs against Comet.
 
 ```bash
-# Static tests only (27 tests, no browser)
+# Static tests only (28 tests, no browser)
 uv run python test_comet.py
 
-# Static and live tests (54 tests), against a Comet started with the flag
+# Static and live tests (55 tests), against a Comet started with the flag
 uv run python test_comet.py --with-browser
 
 # Run one test
