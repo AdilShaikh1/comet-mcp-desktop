@@ -124,9 +124,9 @@ Ask Claude for something on the web. Claude calls `comet_connect` once, then the
 
 ## Tests
 
-`uv run python test_comet.py` runs 26 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
+`uv run python test_comet.py` runs 27 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
 
-`uv run python test_comet.py --with-browser` adds the live tier, for 53 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
+`uv run python test_comet.py --with-browser` adds the live tier, for 54 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
 
 `--test NAME` runs one test, for example `uv run python test_comet.py --test finance_validation`. Results land in `test_results/`, which git ignores.
 

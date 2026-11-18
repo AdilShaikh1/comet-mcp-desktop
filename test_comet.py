@@ -186,6 +186,17 @@ def test_helper_functions():
         record("helper_functions", False, f"{type(e).__name__}: {e}", time.time() - t0)
 
 
+def test_connect_uses_no_defaults():
+    """The server attaches to the user's own Comet, so it must pass no_defaults=True."""
+    t0 = time.time()
+    try:
+        source = open("comet_mcp.py", encoding="utf-8").read()
+        passed = "connect_over_cdp(CDP_URL, no_defaults=True)" in source
+        record("connect_no_defaults", passed, "" if passed else "connect_over_cdp lacks no_defaults=True", time.time() - t0)
+    except Exception as e:
+        record("connect_no_defaults", False, f"{type(e).__name__}: {e}", time.time() - t0)
+
+
 def test_cdp_port_parsing():
     """CDP_PORT comes from the URL, falling back to 9222 when the URL has no port."""
     t0 = time.time()
@@ -675,7 +686,7 @@ async def test_playwright_connect():
     try:
         from playwright.async_api import async_playwright
         pw = await async_playwright().start()
-        browser = await pw.chromium.connect_over_cdp(CDP_URL)
+        browser = await pw.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
         ctx = browser.contexts
         pages = ctx[0].pages if ctx else []
         record("playwright_connect", True,
@@ -1219,6 +1230,7 @@ def run_static_tests(test_filter=None):
         ("tools_are_async", test_tools_are_async),
         ("helper_functions", test_helper_functions),
         ("cdp_port_parsing", test_cdp_port_parsing),
+        ("connect_no_defaults", test_connect_uses_no_defaults),
         ("connect_failure_start_command", test_connect_failure_gives_start_command),
         ("no_process_kill", test_no_process_kill),
         ("error_handling", test_error_handling),

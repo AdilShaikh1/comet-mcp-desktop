@@ -107,7 +107,8 @@ async def _ensure_browser() -> Browser:
     _playwright = await async_playwright().start()
 
     try:
-        _browser = await _playwright.chromium.connect_over_cdp(CDP_URL)
+        # It attaches to the user's own browser, so Playwright must not change its default context.
+        _browser = await _playwright.chromium.connect_over_cdp(CDP_URL, no_defaults=True)
         return _browser
     except Exception as error:
         # First line only: Playwright errors carry a long call log after it.
