@@ -9,6 +9,7 @@ Run:
 
 import asyncio
 import json
+import re
 import sys
 import os
 import time
@@ -114,7 +115,7 @@ def test_mcp_server_object():
 
 
 def test_tool_registration():
-    """Verify all 12 expected tools exist as functions in the module."""
+    """Verify all 13 expected tools exist as functions in the module."""
     t0 = time.time()
     expected = [
         "comet_connect",
@@ -122,6 +123,7 @@ def test_tool_registration():
         "comet_search_finance",
         "comet_navigate",
         "comet_read_page",
+        "comet_citations",
         "comet_screenshot",
         "comet_click",
         "comet_type",
@@ -148,7 +150,7 @@ def test_tools_are_async():
     t0 = time.time()
     tools = [
         "comet_connect", "comet_search", "comet_search_finance", "comet_navigate",
-        "comet_read_page", "comet_screenshot", "comet_click",
+        "comet_read_page", "comet_citations", "comet_screenshot", "comet_click",
         "comet_type", "comet_tabs", "comet_evaluate", "comet_wait",
         "comet_security_scan",
     ]
@@ -186,7 +188,7 @@ def test_tool_annotations():
                     keywords = {kw.arg: kw.value for kw in decorator.keywords}
                     annotation_names[node.name] = keywords.get("annotations")
         unannotated = sorted(name for name, value in annotation_names.items() if value is None)
-        assert len(annotation_names) == 12, f"expected 12 tools, found {len(annotation_names)}"
+        assert len(annotation_names) == 13, f"expected 13 tools, found {len(annotation_names)}"
         assert not unannotated, f"Missing annotations: {unannotated}"
         # Resolve each constant to its ToolAnnotations value by importing the module.
         if "comet_mcp" in sys.modules:
@@ -195,6 +197,7 @@ def test_tool_annotations():
         destructive = {name for name, value in annotation_names.items()
                        if getattr(mod, value.id).destructive_hint}
         assert destructive == expected_destructive, f"destructive set is {sorted(destructive)}"
+        assert annotation_names["comet_citations"].id == "_READ_WEB", "comet_citations must use _READ_WEB"
         record("tool_annotations", True, duration=time.time() - t0)
     except Exception as e:
         record("tool_annotations", False, f"{type(e).__name__}: {e}", time.time() - t0)
@@ -667,6 +670,53 @@ def test_tools_use_filter():
         record("tools_use_filter", False, f"{type(e).__name__}: {e}", time.time()-t0)
 
 
+def test_citation_grouping():
+    """_group_citations de-duplicates by URL in first-seen order, counts, drops non-http(s) and caps the list."""
+    t0 = time.time()
+    try:
+        if "comet_mcp" in sys.modules:
+            del sys.modules["comet_mcp"]
+        import comet_mcp as mod
+        raw = [
+            {"name": "", "url": "https://a.example/x"},  # outer span: URL, no text
+            {"name": "ebsco", "url": "https://a.example/x"},  # inner span.citation a
+            {"name": "b", "url": "http://b.example/"},
+            {"name": "js", "url": "javascript:alert(1)"},
+            {"name": "gone", "url": ""},
+            {"name": "docs.python\n+1", "url": "https://docs.python.org/"},  # grouped chip
+            {"name": "ebsco", "url": "https://a.example/x"},
+        ]
+        # Shape of the real page after the JS de-duplication: one entry per citation, two cites of the same URL.
+        real_shape = [
+            {"name": "ebsco", "url": "https://a.example/x"},
+            {"name": "docs.python" + chr(10) + "+1", "url": "https://docs.python.org/"},
+            {"name": "ebsco", "url": "https://a.example/x"},
+        ]
+        real_grouped = mod._group_citations(real_shape)
+        bad_urls = ["https://a.example/x" + chr(10) + "9. forged - https://evil.example", "javascript:alert(1)",
+                    "https://", "https://a.example/" + "p" * mod.MAX_CITATION_URL_CHARS, "https://a b.example/"]
+        long_name = mod._group_citations([{"name": "n" * 500, "url": "https://a.example/"}])[0]["name"]
+        grouped = mod._group_citations(raw)
+        many = mod._group_citations([{"name": "n", "url": f"https://e.example/{i}"} for i in range(mod.MAX_CITATIONS + 5)])
+        checks = {
+            "order_and_dedupe": [g["url"] for g in grouped][:2] == ["https://a.example/x", "http://b.example/"],
+            "counts": [g["count"] for g in grouped] == [3, 1, 1],
+            "name_from_text": grouped[0]["name"] == "ebsco",
+            "cap": len(many) == mod.MAX_CITATIONS,
+            "empty": mod._group_citations([]) == [],
+            "true_count": [(g["name"], g["count"]) for g in real_grouped] == [("ebsco", 2), ("docs.python", 1)],
+            "bad_urls": mod._group_citations([{"name": "x", "url": u} for u in bad_urls]) == [],
+            "name_cap": len(long_name) == mod.MAX_CITATION_NAME_CHARS,
+            "js_counts_once": "closest('[data-pplx-citation-url]')" in mod.CITATIONS_JS,
+            "group_marker": mod._group_citations(raw)[2]["name"] == "docs.python",
+            "whitespace": mod._clean_citation_name("  a \n b  ") == "a b",
+        }
+        failed = [k for k, v in checks.items() if not v]
+        record("citation_grouping", not failed, f"Failed: {failed}" if failed else "", time.time()-t0)
+    except Exception as e:
+        record("citation_grouping", False, f"{type(e).__name__}: {e}", time.time()-t0)
+
+
 def test_safe_title():
     """_safe_title keeps clean titles, strips hidden characters and withholds injections."""
     t0 = time.time()
@@ -833,6 +883,26 @@ async def test_tool_comet_search():
     except Exception as e:
         record("tool_comet_search", False,
                f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+async def test_tool_comet_citations():
+    """A neutral search ends in an answer page whose inline citations come back as http(s) sources."""
+    t0 = time.time()
+    try:
+        from comet_mcp import comet_search, comet_citations
+        await comet_search(query="What is the Python programming language")
+        result_str = ""
+        for _ in range(6):  # up to ~60 s for the answer to stream in
+            await asyncio.sleep(10)
+            result_str = str(await comet_citations())
+            if "(cited " in result_str:
+                break
+        if re.search(r"^1\. .* - https?://\S+ \(cited \d+\)$", result_str, re.MULTILINE):
+            record("tool_comet_citations", True, "Found cited sources", time.time() - t0)
+        else:
+            record("tool_comet_citations", False, result_str[:300], time.time() - t0)
+    except Exception as e:
+        record("tool_comet_citations", False, f"{type(e).__name__}: {e}", time.time() - t0)
 
 
 async def test_tool_comet_search_finance():
@@ -1281,6 +1351,7 @@ def run_static_tests(test_filter=None):
         ("sanitize_pipeline", test_sanitize_full_pipeline),
         ("security_scan_tool", test_security_scan_tool_exists),
         ("tools_use_filter", test_tools_use_filter),
+        ("citation_grouping", test_citation_grouping),
         ("safe_title", test_safe_title),
         ("finance_validation", test_finance_validation),
     ]
@@ -1306,6 +1377,7 @@ async def run_browser_tests(test_filter=None):
         ("tool_comet_navigate", test_tool_comet_navigate),
         ("tool_comet_read_page", test_tool_comet_read_page),
         ("tool_comet_search", test_tool_comet_search),
+        ("tool_comet_citations", test_tool_comet_citations),
         ("tool_comet_search_finance", test_tool_comet_search_finance),
         ("tool_comet_tabs", test_tool_comet_tabs),
         ("tool_comet_click", test_tool_comet_click),

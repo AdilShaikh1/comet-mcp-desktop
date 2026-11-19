@@ -1,6 +1,6 @@
 <h1 align="center">Comet MCP Desktop</h1>
 
-<p align="center"><strong>Claude drives Perplexity's Comet browser through twelve&nbsp;MCP&nbsp;tools.</strong></p>
+<p align="center"><strong>Claude drives Perplexity's Comet browser through thirteen&nbsp;MCP&nbsp;tools.</strong></p>
 
 <p align="center">An MCP server for Claude Desktop and&nbsp;Claude&nbsp;Code.<br>It connects to Comet over the Chrome DevTools Protocol and lets Claude search Perplexity, open pages, read them, click, type and take screenshots.</p>
 
@@ -12,7 +12,7 @@ The server talks to Claude over MCP stdio and to Comet over the Chrome DevTools 
 
 `comet_search` opens a new tab for each query and returns at once. Perplexity streams the answer in that tab. Claude reads it with `comet_read_page` about 15 to 20 seconds later, or 30 to 45 seconds later in research mode. The server keeps at most 5 search tabs and closes the oldest first.
 
-The results of `comet_search`, `comet_search_finance`, `comet_navigate`, `comet_read_page` and `comet_evaluate` pass through a ContentFilter before Claude sees them. `comet_connect`, `comet_click`, `comet_screenshot` and `comet_tabs` check page titles against the filter's injection patterns and withhold a flagged title. They show URLs as they are. The filter strips hidden characters and HTML comments, scans for 39 prompt-injection patterns and starts the result with a header. The header names the source and its trust tier, or lists the patterns it found. [docs/security.md](docs/security.md) lists the patterns, the tiers and which tools are filtered.
+The results of `comet_search`, `comet_search_finance`, `comet_navigate`, `comet_read_page`, `comet_citations` and `comet_evaluate` pass through a ContentFilter before Claude sees them. `comet_connect`, `comet_click`, `comet_screenshot` and `comet_tabs` check page titles against the filter's injection patterns and withhold a flagged title. They show URLs as they are. The filter strips hidden characters and HTML comments, scans for 39 prompt-injection patterns and starts the result with a header. The header names the source and its trust tier, or lists the patterns it found. [docs/security.md](docs/security.md) lists the patterns, the tiers and which tools are filtered.
 
 | Tool | What it does |
 | --- | --- |
@@ -21,6 +21,7 @@ The results of `comet_search`, `comet_search_finance`, `comet_navigate`, `comet_
 | `comet_search_finance` | Opens a Perplexity Finance page in the active tab (market, quote, screener, earnings or predictions). |
 | `comet_navigate` | Opens a URL in the active tab and returns a text preview. |
 | `comet_read_page` | Reads the page text, or only the part a CSS selector matches. |
+| `comet_citations` | Lists the sources an answer cites inline, with the number of times each is cited. |
 | `comet_screenshot` | Takes a screenshot and returns it as a base64 PNG. |
 | `comet_click` | Clicks an element by CSS selector or by `text=...`. |
 | `comet_type` | Types into an input field. |
@@ -124,15 +125,15 @@ Ask Claude for something on the web. Claude calls `comet_connect` once, then the
 
 ## Tests
 
-`uv run python test_comet.py` runs 28 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
+`uv run python test_comet.py` runs 29 static tests with no browser. They cover syntax, tool registration, parameter checks and the ContentFilter.
 
-`uv run python test_comet.py --with-browser` adds the live tier, for 55 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
+`uv run python test_comet.py --with-browser` adds the live tier, for 57 tests in total, against a Comet started with `--remote-debugging-port=9222`. When the CDP port doesn't answer, the run records `cdp_connection` as failed and skips the rest of the live tier. The live tests use the Perplexity account Comet is signed in to, and they never submit a Finance screener query.
 
 `--test NAME` runs one test, for example `uv run python test_comet.py --test finance_validation`. Results land in `test_results/`, which git ignores.
 
 ## Repository layout
 
-- `comet_mcp.py`: the server and its 12 tools
+- `comet_mcp.py`: the server and its 13 tools
 - `content_filter.py`: the ContentFilter and its injection patterns
 - `test_comet.py`: the static and live tests
 - `main.py`: a second entry point, `uv run python main.py`

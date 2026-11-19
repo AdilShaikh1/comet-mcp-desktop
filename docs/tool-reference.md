@@ -1,6 +1,6 @@
 # Tool Reference
 
-Complete API documentation for all 12 Comet MCP tools.
+Complete API documentation for all 13 Comet MCP tools.
 
 **Errors.** A failed call is an MCP tool error, with `is_error=True` and the message as its text. The client shows it as `Error executing tool <name>: <message>`. Bad parameters, a lost connection and a timeout all fail this way, so the notes below only say what is rejected.
 
@@ -112,6 +112,33 @@ Read text content from the current page.
 - With a selector, extracts text from matching elements only
 - When `include_links` is true, writes each link inline as `[text](href)`
 - Content passes through the ContentFilter before being returned
+
+---
+
+## `comet_citations`
+
+List the sources the answer on the current page cites inline. Call it after `comet_read_page` on a Perplexity answer page.
+
+No parameters.
+
+**Notes:**
+- Reads only the inline citations already on the page. It does not open the Links tab, so the list can be shorter than Perplexity's full source list
+- Counts each citation once, groups by URL in first-seen order and lists at most 50 sources
+- Keeps only http(s) URLs with a host, no whitespace or control characters and at most 500 characters; names are cut at 80 characters
+- The result is cut at `COMET_MAX_CONTENT` characters with a marker
+- The name is the citation's visible text, usually the source's short name
+- A grouped chip ("+N") hides further sources that appear only on hover, so the tool lists the chip's first source. The Links tab holds the full list
+- When the page shows no inline citations, the result says so and suggests `comet_search` or waiting for the answer
+- Content passes through the ContentFilter before being returned
+
+**Example output:**
+```
+**Page**: What is the Python programming language - Perplexity
+**URL**: https://www.perplexity.ai/search/what-is-the-python-programming-language-abc123
+
+1. python - https://www.python.org/about/ (cited 2)
+2. ebsco - https://www.ebsco.com/research-starters/computer-science/python-programming-language (cited 1)
+```
 
 ---
 
@@ -282,6 +309,7 @@ Every tool sends MCP annotations, which clients use to decide what to auto-appro
 |---|---|---|---|---|
 | `comet_connect` | yes | no | yes | no |
 | `comet_read_page` | yes | no | yes | yes |
+| `comet_citations` | yes | no | yes | yes |
 | `comet_screenshot` | yes | no | yes | yes |
 | `comet_security_scan` | yes | no | yes | yes |
 | `comet_wait` | yes | no | yes | yes |
