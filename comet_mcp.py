@@ -63,6 +63,22 @@ VALID_FINANCE_MODES = ("market", "quote", "screener", "earnings", "predictions")
 FINANCE_BASE_URL = "https://www.perplexity.ai/finance"
 MAX_TICKER_CHARS = 20
 MAX_SCREENER_QUERY_CHARS = 500  # about 15 s of typing at 30 ms a key
+MAX_CITATIONS = 50  # sources listed by comet_citations
+MAX_CITATION_URL_CHARS = 500  # longer URLs are dropped, not truncated, since a cut URL points elsewhere
+MAX_CITATION_NAME_CHARS = 80  # longer names are truncated
+# Perplexity marks each inline citation with data-pplx-citation-url on an outer span and nests a second
+# span.citation holding an <a href>. Each citation is counted once: the outer span, or the inner link
+# only when it has no outer span around it.
+CITATIONS_JS = """() => {
+    const root = document.querySelector('main') || document.body;
+    const found = [];
+    for (const el of root.querySelectorAll('[data-pplx-citation-url], span.citation a[href]')) {
+        if (!el.hasAttribute('data-pplx-citation-url') && el.closest('[data-pplx-citation-url]')) continue;
+        const url = el.getAttribute('data-pplx-citation-url') || el.href;
+        if (url) found.push({name: (el.innerText || el.textContent || '').trim(), url});
+    }
+    return found;
+}"""
 
 
 def _clamp_wait(value: int, default: int = 10) -> int:
@@ -291,7 +307,8 @@ async def comet_connect() -> str:
             f"**Search**: comet_search starts a search and returns immediately (new tab per query, max {MAX_SEARCH_TABS}). "
             f"Use mode='research' for complex queries. Perplexity streams the answer in the background.\n"
             f"**Read**: Call comet_read_page after ~30-45s (research) or ~15-20s (search) to get results. "
-            f"Use comet_security_scan on any page that seems suspicious.\n"
+            f"Use comet_security_scan on any page that seems suspicious. "
+            f"After comet_read_page, comet_citations lists the sources the answer cites.\n"
             f"**Tabs**: Each search gets its own tab (tagged [search] in comet_tabs list). "
             f"Use comet_tabs to list/switch/close. Oldest search tab auto-closes at cap.\n"
             f"**Errors**: a failed tool call is an MCP tool error (is_error) with the message. 'connection lost' → call comet_connect again. "
@@ -596,6 +613,70 @@ async def comet_read_page(
         return _sanitize_and_return(combined, url)
     except Exception as e:
         raise _handle_error(e) from e
+
+
+# A grouped chip reads "docs.python", a line break, then "+1": one more source, shown only on hover.
+GROUP_MARKER_PATTERN = re.compile(r"\s*\+\d+$")
+
+
+def _clean_citation_name(name) -> str:
+    """Collapse whitespace to single spaces and drop a trailing "+N" group marker."""
+    return GROUP_MARKER_PATTERN.sub("", " ".join(str(name).split()))
+
+
+def _is_listable_url(url: str) -> bool:
+    """True for a plain http(s) URL with a host, no whitespace or control characters, within the length cap."""
+    # A newline or other control character in a page-controlled URL could forge extra output lines.
+    if not url or len(url) > MAX_CITATION_URL_CHARS or any(char.isspace() or not char.isprintable() for char in url):
+        return False
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _group_citations(raw_citations: list) -> list[dict]:
+    """Group raw {name, url} citations by URL in first-seen order, keeping valid http(s) URLs only."""
+    sources: dict[str, dict] = {}
+    for citation in raw_citations:
+        url = str(citation.get("url", ""))
+        if not _is_listable_url(url):
+            continue
+        source = sources.setdefault(url, {"name": "", "url": url, "count": 0})
+        # The outer and inner spans both carry the URL but only one has text; keep the first name found.
+        source["name"] = source["name"] or _clean_citation_name(citation.get("name", ""))[:MAX_CITATION_NAME_CHARS]
+        source["count"] += 1
+    return list(sources.values())[:MAX_CITATIONS]
+
+
+@mcp.tool(annotations=_READ_WEB)
+async def comet_citations() -> str:
+    """List the sources an answer on the current page cites inline (name, URL, times cited).
+
+    Call after comet_read_page on a Perplexity answer. Reads only the inline citations
+    already on the page; it does not open the Links tab, so the list can be shorter than
+    Perplexity's full source list. A grouped chip ("+N") hides further sources that appear
+    only on hover, so the tool lists the chip's first source; the Links tab holds the full list.
+    """
+    try:
+        page = await _get_page()
+        title = await page.title()
+        url = page.url
+        sources = _group_citations(await page.evaluate(CITATIONS_JS))
+        if not sources:
+            body = (
+                "No inline citations on the current page. Run comet_search and wait for the "
+                "answer to finish streaming, or check that this tab is a Perplexity answer page."
+            )
+        else:
+            body = "\n".join(
+                f"{index}. {source['name'] or '(unnamed)'} - {source['url']} (cited {source['count']})"
+                for index, source in enumerate(sources, start=1)
+            )
+        combined = f"**Page**: {_safe_title(title)}\n**URL**: {url}\n\n{body}"
+        if len(combined) > MAX_CONTENT_LENGTH:
+            combined = combined[:MAX_CONTENT_LENGTH] + "\n[truncated at COMET_MAX_CONTENT]"
+        return _sanitize_and_return(combined, url)
+    except Exception as e:
+        raise _handle_error(e, "Reading citations") from e
 
 
 @mcp.tool(annotations=_READ_WEB)

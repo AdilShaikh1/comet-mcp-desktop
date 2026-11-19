@@ -15,6 +15,7 @@ Comet Browser  ──→  raw text  ──→  ContentFilter.sanitize()  ──�
 | `comet_search` | Yes | Tab URL only; the answer is filtered when `comet_read_page` reads it |
 | `comet_search_finance` | Yes | Mode label, URL and page title (the title is page-controlled); the finance data is filtered when `comet_read_page` reads it |
 | `comet_read_page` | Yes | Extracted page text |
+| `comet_citations` | Yes | Source names and the page title pass the filter; URLs are validated (http or https with a host, no whitespace or control characters, at most 500 characters) |
 | `comet_navigate` | Yes | Preview text snippet |
 | `comet_evaluate` | Yes | Every result; objects and lists are JSON-encoded first |
 | `comet_screenshot` | Title only | The page title is checked and withheld when flagged; the URL is unfiltered |

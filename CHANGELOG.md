@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A new `comet_citations` tool lists the sources a Perplexity answer cites. (#13)
 - Every tool now tells MCP clients whether it only reads, can change or destroy page state, and reaches the web. (#12)
 - The server needs Playwright 1.65 and attaches to Comet without changing its downloads, fonts, focus or media settings. (#11)
 - The server runs on mcp 2.x, and tool errors reach the client as MCP tool errors instead of plain text. (#10)
